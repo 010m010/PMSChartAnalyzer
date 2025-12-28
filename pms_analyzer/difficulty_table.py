@@ -111,7 +111,12 @@ def analyze_table(
             continue
 
         parse_result = parser.parse(resolved_path)
-        density = compute_density(parse_result.notes, parse_result.total_time, terminal_window=terminal_window)
+        density = compute_density(
+            parse_result.notes,
+            parse_result.total_time,
+            terminal_window=terminal_window,
+            total_value=parse_result.total_value,
+        )
         entry.note_count = entry.note_count or len(parse_result.notes)
         entry.total_value = entry.total_value or parse_result.total_value
         analyses.append(

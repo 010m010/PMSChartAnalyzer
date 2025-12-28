@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from statistics import mean
 
 from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDragMoveEvent
+from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -93,7 +93,7 @@ class AnalysisWorker(QThread):
     def run(self) -> None:  # type: ignore[override]
         try:
             result = self.parser.parse(self.path)
-            density = compute_density(result.notes, result.total_time)
+            density = compute_density(result.notes, result.total_time, total_value=result.total_value)
             self.finished.emit(result, density)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc())
@@ -169,7 +169,8 @@ class SingleAnalysisTab(QWidget):
         grid = QGridLayout()
         labels = {
             "max_density": "秒間密度(最大)",
-            "terminal_density": "終端秒間密度(終盤5秒平均)",
+            "terminal_density": "終端密度(クリアゲージ基準)",
+            "terminal_rms_density": "終端RMS(クリアゲージ基準)",
             "average_density": "平均密度(全体)",
             "rms_density": "RMS",
         }
@@ -234,6 +235,7 @@ class SingleAnalysisTab(QWidget):
                 "max_density": density.max_density,
                 "average_density": density.average_density,
                 "terminal_density": density.terminal_density,
+                "terminal_rms_density": density.terminal_rms_density,
                 "rms_density": density.rms_density,
             },
         )
@@ -246,6 +248,7 @@ class SingleAnalysisTab(QWidget):
     def _update_metrics(self, density: DensityResult) -> None:
         self.metrics_labels["max_density"].setText(f"{density.max_density:.2f} note/s")
         self.metrics_labels["terminal_density"].setText(f"{density.terminal_density:.2f} note/s")
+        self.metrics_labels["terminal_rms_density"].setText(f"{density.terminal_rms_density:.2f} note/s")
         self.metrics_labels["average_density"].setText(f"{density.average_density:.2f} note/s")
         self.metrics_labels["rms_density"].setText(f"{density.rms_density:.2f} note/s")
 
@@ -275,7 +278,7 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 11)
+        self.table_widget = QTableWidget(0, 12)
         self.table_widget.setHorizontalHeaderLabels(
             [
                 "LEVEL",
@@ -285,6 +288,7 @@ class DifficultyTab(QWidget):
                 "増加率",
                 "平均密度",
                 "終端密度",
+                "終端RMS",
                 "RMS",
                 "md5",
                 "sha256",
@@ -300,12 +304,14 @@ class DifficultyTab(QWidget):
         self.url_list = QComboBox()
         self.url_list.setEditable(False)
         self.metric_selector = QComboBox()
-        self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "RMS"])
+        self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "終端RMS", "RMS"])
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["散布図", "箱ひげ図"])
-        self.summary_table = QTableWidget(0, 9)
+        self.summary_metric_selector = QComboBox()
+        self.summary_metric_selector.addItems(["総NOTES", "増加率", "平均密度", "終端密度", "終端RMS", "RMS"])
+        self.summary_table = QTableWidget(0, 8)
         self.summary_table.setHorizontalHeaderLabels(
-            ["LEVEL", "総NOTES数", "増加率", "最小", "Q1", "中央値", "Q3", "最大", "平均"]
+            ["LEVEL", "解析済み譜面数", "最小", "Q1", "中央値", "最大", "Q3", "平均"]
         )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.songdata_label = QLabel("songdata.db: 未設定")
@@ -355,10 +361,33 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.metric_selector)
         metric_layout.addWidget(QLabel("グラフ:"))
         metric_layout.addWidget(self.chart_type_selector)
-        chart_layout.addLayout(metric_layout)
-        chart_layout.addWidget(self.difficulty_chart)
-        chart_layout.addWidget(self.box_chart)
-        chart_layout.addWidget(self.summary_table)
+
+        chart_area = QWidget()
+        chart_area_layout = QVBoxLayout()
+        chart_area_layout.setContentsMargins(0, 0, 0, 0)
+        chart_area_layout.addLayout(metric_layout)
+        chart_area_layout.addWidget(self.difficulty_chart)
+        chart_area_layout.addWidget(self.box_chart)
+        chart_area.setLayout(chart_area_layout)
+
+        summary_container = QWidget()
+        summary_layout = QVBoxLayout()
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_header = QHBoxLayout()
+        summary_header.addWidget(QLabel("難易度ごとの統計"))
+        summary_header.addStretch()
+        summary_header.addWidget(QLabel("項目:"))
+        summary_header.addWidget(self.summary_metric_selector)
+        summary_layout.addLayout(summary_header)
+        summary_layout.addWidget(self.summary_table)
+        summary_container.setLayout(summary_layout)
+
+        chart_splitter = QSplitter(Qt.Orientation.Vertical)
+        chart_splitter.setChildrenCollapsible(False)
+        chart_splitter.addWidget(chart_area)
+        chart_splitter.addWidget(summary_container)
+
+        chart_layout.addWidget(chart_splitter)
         chart_container.setLayout(chart_layout)
 
         splitter.addWidget(table_container)
@@ -371,6 +400,7 @@ class DifficultyTab(QWidget):
         self.url_list.currentTextChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.chart_type_selector.currentTextChanged.connect(self._refresh_chart_only)
+        self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
         self.delete_button.clicked.connect(self._delete_saved)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
@@ -504,10 +534,11 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 4, QTableWidgetItem(rate))
             self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.average_density:.2f}"))
             self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.terminal_density:.2f}"))
-            self.table_widget.setItem(row, 7, QTableWidgetItem(f"{density.rms_density:.2f}"))
-            self.table_widget.setItem(row, 8, QTableWidgetItem(analysis.md5 or ""))
-            self.table_widget.setItem(row, 9, QTableWidgetItem(analysis.sha256 or ""))
-            self.table_widget.setItem(row, 10, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
+            self.table_widget.setItem(row, 7, QTableWidgetItem(f"{density.terminal_rms_density:.2f}"))
+            self.table_widget.setItem(row, 8, QTableWidgetItem(f"{density.rms_density:.2f}"))
+            self.table_widget.setItem(row, 9, QTableWidgetItem(analysis.md5 or ""))
+            self.table_widget.setItem(row, 10, QTableWidgetItem(analysis.sha256 or ""))
+            self.table_widget.setItem(row, 11, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
         self._render_chart()
         self._render_summary()
@@ -522,15 +553,9 @@ class DifficultyTab(QWidget):
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
         for analysis in self._latest_analyses:
-            density = analysis.density
-            if metric == "総NOTES":
-                value = float(analysis.note_count or 0)
-            elif metric == "終端密度":
-                value = density.terminal_density
-            elif metric == "RMS":
-                value = density.rms_density
-            else:
-                value = density.average_density
+            value = self._metric_value(analysis, metric)
+            if value is None:
+                continue
             key = self._format_difficulty(analysis.difficulty)
             data.setdefault(key, []).append(value)
 
@@ -550,26 +575,34 @@ class DifficultyTab(QWidget):
             self.difficulty_chart.show()
             self.difficulty_chart.plot(scatter_points, y_label=metric, order=ordered_keys, sort_key=difficulty_sort_key)
 
+    def _metric_value(self, analysis: ChartAnalysis, metric: str) -> float | None:
+        density = analysis.density
+        if metric == "総NOTES":
+            return float(analysis.note_count or 0)
+        if metric == "終端密度":
+            return density.terminal_density
+        if metric == "終端RMS":
+            return density.terminal_rms_density
+        if metric == "RMS":
+            return density.rms_density
+        if metric == "増加率":
+            if analysis.total_value is not None and analysis.note_count:
+                return analysis.total_value / analysis.note_count
+            return None
+        return density.average_density
+
     def _render_summary(self) -> None:
-        metric = self.metric_selector.currentText()
+        metric = self.summary_metric_selector.currentText()
         rows = {}
         for analysis in self._latest_analyses:
             key = self._format_difficulty(analysis.difficulty)
-            density = analysis.density
-            if metric == "総NOTES":
-                val = float(analysis.note_count or 0)
-            elif metric == "終端密度":
-                val = density.terminal_density
-            elif metric == "RMS":
-                val = density.rms_density
-            else:
-                val = density.average_density
-            rows.setdefault(key, {"values": [], "notes": [], "rates": []})
-            rows[key]["values"].append(val)
-            if analysis.note_count is not None:
-                rows[key]["notes"].append(analysis.note_count)
-            if analysis.total_value is not None and analysis.note_count:
-                rows[key]["rates"].append(analysis.total_value / analysis.note_count)
+            rows.setdefault(key, {"values": [], "total": 0, "parsed": 0})
+            rows[key]["total"] += 1
+            if analysis.resolved_path:
+                rows[key]["parsed"] += 1
+            val = self._metric_value(analysis, metric)
+            if val is not None:
+                rows[key]["values"].append(val)
 
         ordered = sorted(rows.keys(), key=difficulty_sort_key)
         if not ordered:
@@ -578,14 +611,15 @@ class DifficultyTab(QWidget):
         self.summary_table.setRowCount(len(ordered))
         for idx, key in enumerate(ordered):
             values = rows[key]["values"]
-            notes_list = rows[key]["notes"]
-            rates_list = rows[key]["rates"]
             self.summary_table.setItem(idx, 0, QTableWidgetItem(key))
-            self.summary_table.setItem(idx, 1, QTableWidgetItem(f"{_mean(notes_list):.2f}" if notes_list else "-"))
-            self.summary_table.setItem(idx, 2, QTableWidgetItem(f"{_mean(rates_list):.4f}" if rates_list else "-"))
+            count_text = f"{rows[key]['parsed']}/{rows[key]['total']}"
+            count_item = QTableWidgetItem(count_text)
+            if rows[key]["parsed"] < rows[key]["total"]:
+                count_item.setForeground(QColor("red"))
+            self.summary_table.setItem(idx, 1, count_item)
             stats = _quantiles(values)
-            labels = [stats["min"], stats["q1"], stats["median"], stats["q3"], stats["max"], stats["mean"]]
-            for col, val in enumerate(labels, start=3):
+            labels = [stats["min"], stats["q1"], stats["median"], stats["max"], stats["q3"], stats["mean"]]
+            for col, val in enumerate(labels, start=2):
                 text = "-" if val is None else f"{val:.2f}"
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
