@@ -50,6 +50,15 @@ def add_saved_table(url: str) -> None:
     save_config(config)
 
 
+def remove_saved_table(url: str) -> None:
+    config = load_config()
+    urls = list(config.get("difficulty_urls", [])) if isinstance(config.get("difficulty_urls", []), list) else []
+    if url in urls:
+        urls.remove(url)
+    config["difficulty_urls"] = urls
+    save_config(config)
+
+
 def load_history() -> Dict[str, List[Dict[str, object]]]:
     if HISTORY_PATH.exists():
         return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))

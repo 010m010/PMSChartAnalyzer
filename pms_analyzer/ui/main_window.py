@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QComboBox,
+    QAbstractItemView,
+    QPushButton,
 )
 import requests
 
@@ -37,7 +39,15 @@ from ..difficulty_table import (
     load_difficulty_table_from_content,
 )
 from ..pms_parser import PMSParser
-from ..storage import AnalysisRecord, add_saved_table, append_history, get_saved_tables, load_config, save_config
+from ..storage import (
+    AnalysisRecord,
+    add_saved_table,
+    append_history,
+    get_saved_tables,
+    load_config,
+    save_config,
+    remove_saved_table,
+)
 from .charts import DifficultyScatterChart, StackedDensityChart
 
 
@@ -75,8 +85,21 @@ class DifficultyTableWorker(QThread):
         try:
             response = requests.get(self.table_source, timeout=15)
             response.raise_for_status()
-            suffix = ".json" if self.table_source.lower().endswith(".json") else ".csv"
-            table = load_difficulty_table_from_content(self.saved_name, response.text, suffix)
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "html" in content_type or self.table_source.lower().endswith((".html", ".htm")):
+                suffix = ".html"
+            elif self.table_source.lower().endswith(".json"):
+                suffix = ".json"
+            elif self.table_source.lower().endswith(".csv"):
+                suffix = ".csv"
+            else:
+                suffix = ".html" if "<html" in response.text.lower() else ".csv"
+            table = load_difficulty_table_from_content(
+                self.saved_name,
+                response.text,
+                suffix,
+                source_url=self.table_source,
+            )
             analyses = analyze_table(
                 table,
                 self.parser,
@@ -223,20 +246,22 @@ class DifficultyTab(QWidget):
         self.table_widget = QTableWidget(0, 10)
         self.table_widget.setHorizontalHeaderLabels(
             [
-                "難易度表上の難易度値",
+                "LEVEL",
                 "曲名",
                 "総NOTES数",
                 "TOTAL値",
                 "平均密度",
                 "終端密度",
-                "二乗平均密度",
-                "md5ハッシュ",
-                "sha256ハッシュ",
-                "保存先パス",
+                "RMS",
+                "md5",
+                "sha256",
+                "Path",
             ]
         )
-        self.load_button = QPushButton("難易度表を読み込む")
-        self.analyze_button = QPushButton("一括解析")
+        self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.load_button = QPushButton("読み込む")
+        self.analyze_button = QPushButton("更新")
+        self.delete_button = QPushButton("削除")
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://example.com/table.json など")
         self.url_list = QComboBox()
@@ -255,19 +280,24 @@ class DifficultyTab(QWidget):
         header_layout.addWidget(QLabel("URL:"))
         header_layout.addWidget(self.url_input, 2)
         header_layout.addWidget(self.load_button)
-        header_layout.addWidget(self.analyze_button)
-        header_layout.addWidget(QLabel("縦軸:"))
-        header_layout.addWidget(self.metric_selector)
         layout.addLayout(header_layout)
 
         saved_layout = QHBoxLayout()
         saved_layout.addWidget(QLabel("保存済み:"))
         saved_layout.addWidget(self.url_list, 1)
-        saved_layout.addWidget(self.table_label)
-        saved_layout.addWidget(self.songdata_label)
+        saved_layout.addWidget(self.analyze_button)
+        saved_layout.addWidget(self.delete_button)
         layout.addLayout(saved_layout)
 
+        layout.addWidget(self.songdata_label)
+
         layout.addWidget(self.table_widget)
+        metric_layout = QHBoxLayout()
+        metric_layout.addStretch()
+        metric_layout.addWidget(QLabel("縦軸:"))
+        metric_layout.addWidget(self.metric_selector)
+        layout.addLayout(metric_layout)
+
         layout.addWidget(self.difficulty_chart)
         self.setLayout(layout)
 
@@ -275,6 +305,7 @@ class DifficultyTab(QWidget):
         self.analyze_button.clicked.connect(self._analyze_table)
         self.url_list.currentTextChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
+        self.delete_button.clicked.connect(self._delete_saved)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -320,7 +351,7 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 9, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
         self._render_chart()
-        self.table_label.setText(f"解析済み: {table.name}")
+        self.table_label.setText("")
 
     def _on_failed(self, error_message: str) -> None:
         self.analyze_button.setEnabled(True)
@@ -366,10 +397,19 @@ class DifficultyTab(QWidget):
         self.url_list.clear()
         urls = get_saved_tables()
         self.url_list.addItems(urls)
+        if urls:
+            self.url_list.setCurrentIndex(0)
 
     def _on_select_saved(self, value: str) -> None:
         if value:
             self.url_input.setText(value)
+
+    def _delete_saved(self) -> None:
+        current = self.url_list.currentText()
+        if not current:
+            return
+        remove_saved_table(current)
+        self._refresh_saved_urls()
 
     def refresh_songdata_label(self) -> None:
         config = load_config()

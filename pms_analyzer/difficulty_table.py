@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+from urllib.parse import urljoin
 
 import sqlite3
 
@@ -63,14 +64,19 @@ def load_difficulty_table(path: Path | str, *, base_dir: Optional[Path] = None) 
     return DifficultyTable(name=table_path.stem, entries=entries)
 
 
-def load_difficulty_table_from_content(name: str, content: str, suffix: str, *, base_dir: Optional[Path] = None) -> DifficultyTable:
+def load_difficulty_table_from_content(
+    name: str, content: str, suffix: str, *, base_dir: Optional[Path] = None, source_url: Optional[str] = None
+) -> DifficultyTable:
     suffix = suffix.lower()
-    if suffix not in SUPPORTED_SUFFIXES:
-        raise ValueError(f"Unsupported difficulty table format: {suffix}")
-
-    reader = _read_csv_stream if suffix == ".csv" else _read_json_stream
-    entries = reader(io.StringIO(content), base_dir=base_dir or Path(tempfile.gettempdir()))
-    return DifficultyTable(name=name, entries=entries)
+    if suffix in (".csv", ".json"):
+        reader = _read_csv_stream if suffix == ".csv" else _read_json_stream
+        entries = reader(io.StringIO(content), base_dir=base_dir or Path(tempfile.gettempdir()))
+        return DifficultyTable(name=name, entries=entries)
+    if suffix in (".html", ".htm"):
+        return _load_bms_table_from_html(
+            name, content, base_dir=base_dir or Path(tempfile.gettempdir()), source_url=source_url
+        )
+    raise ValueError(f"Unsupported difficulty table format: {suffix}")
 
 
 def analyze_table(
@@ -212,6 +218,73 @@ def _entry_from_row(row: Dict[str, object], base_dir: Path) -> DifficultyEntry:
         total_value=total_value,
         note_count=note_count,
     )
+
+
+def _load_bms_table_from_html(name: str, html: str, *, base_dir: Path, source_url: Optional[str]) -> DifficultyTable:
+    # BMSTable形式: <meta name="bmstable" content="./header.json">
+    import re
+
+    meta_match = re.search(r'<meta[^>]+name=["\\\']bmstable["\\\'][^>]+content=["\\\']([^"\\\']+)["\\\']', html, re.IGNORECASE)
+    if not meta_match:
+        raise ValueError("bmstable meta tag not found in HTML")
+    header_path = meta_match.group(1).strip()
+    base_href = source_url if source_url else f"file://{base_dir.as_posix()}/"
+    header_url = urljoin(base_href, header_path)
+
+    try:
+        header_text = _fetch_url(header_url)
+        header = json.loads(header_text)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Failed to load bmstable header: {exc}") from exc
+
+    songlist_path = header.get("songlist") or header.get("songs") or header.get("data_url")
+    if not songlist_path:
+        raise ValueError("bmstable header missing songlist")
+    songlist_url = urljoin(header_url, songlist_path)
+    try:
+        song_text = _fetch_url(songlist_url)
+        songs = json.loads(song_text)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Failed to load bmstable songlist: {exc}") from exc
+
+    entries: List[DifficultyEntry] = []
+    for song in songs:
+        diff = str(song.get("level") or song.get("difficulty") or song.get("lr2level") or "Unknown")
+        title = song.get("title") or "Unknown"
+        subtitle = song.get("subtitle")
+        artist = song.get("artist")
+        md5 = song.get("md5") or song.get("md5_hash")
+        sha256 = song.get("sha256") or song.get("sha256_hash") or song.get("sha256sum")
+        notes = song.get("notes") or song.get("note")
+        note_count = None
+        try:
+            note_count = int(notes) if notes is not None else None
+        except (TypeError, ValueError):
+            note_count = None
+        entries.append(
+            DifficultyEntry(
+                difficulty=diff,
+                title=str(title),
+                subtitle=subtitle if subtitle else None,
+                chart_path=None,
+                artist=artist,
+                md5=str(md5) if md5 else None,
+                sha256=str(sha256) if sha256 else None,
+                total_value=None,
+                note_count=note_count,
+            )
+        )
+
+    return DifficultyTable(name=header.get("name") or name, entries=entries)
+
+
+def _fetch_url(url: str) -> str:
+    import requests
+
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    resp.encoding = resp.apparent_encoding or resp.encoding
+    return resp.text
 
 
 def _resolve_path(value: str, base_dir: Path) -> Optional[Path]:
