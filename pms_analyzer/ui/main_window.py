@@ -276,7 +276,7 @@ class DifficultyTab(QWidget):
         self.url_list.currentTextChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self._refresh_saved_urls()
-        self._refresh_songdata_label()
+        self.refresh_songdata_label()
 
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
@@ -360,7 +360,7 @@ class DifficultyTab(QWidget):
         self._worker.start()
         add_saved_table(url)
         self._refresh_saved_urls()
-        self._refresh_songdata_label()
+        self.refresh_songdata_label()
 
     def _refresh_saved_urls(self) -> None:
         self.url_list.clear()
@@ -370,6 +370,14 @@ class DifficultyTab(QWidget):
     def _on_select_saved(self, value: str) -> None:
         if value:
             self.url_input.setText(value)
+
+    def refresh_songdata_label(self) -> None:
+        config = load_config()
+        songdata_dir = config.get("songdata_dir")
+        if songdata_dir:
+            self.songdata_label.setText(f"songdata.db: {songdata_dir}")
+        else:
+            self.songdata_label.setText("songdata.db: 未設定")
 
     def _refresh_chart_only(self) -> None:
         if not self._latest_analyses:
@@ -430,13 +438,14 @@ class MainWindow(QMainWindow):
             config = load_config()
             config["songdata_dir"] = directory
             save_config(config)
-            self._refresh_songdata_label()
+            self.table_tab.refresh_songdata_label()
             QMessageBox.information(self, "保存", "songdata.db のパスを保存しました")
 
     def _load_config(self) -> None:
         config = load_config()
         if config.get("songdata_dir"):
             self.statusBar().showMessage(f"songdata.db: {config['songdata_dir']}")
+            self.table_tab.refresh_songdata_label()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
@@ -471,12 +480,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "不正な形式", ".pms または .bms ファイルを指定してください")
 
     def _refresh_songdata_label(self) -> None:
-        config = load_config()
-        songdata_dir = config.get("songdata_dir")
-        if songdata_dir:
-            self.songdata_label.setText(f"songdata.db: {songdata_dir}")
-        else:
-            self.songdata_label.setText("songdata.db: 未設定")
+        # Backward compatibility: call the public method used by MainWindow
+        self.refresh_songdata_label()
 
 
 def run_app() -> None:
