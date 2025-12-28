@@ -40,6 +40,7 @@ from ..difficulty_table import (
     load_difficulty_table_from_content,
 )
 from ..pms_parser import PMSParser
+from ..utils import difficulty_sort_key
 from ..storage import (
     AnalysisRecord,
     add_saved_table,
@@ -377,18 +378,12 @@ class DifficultyTab(QWidget):
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
         if not url:
-            QMessageBox.warning(self, "未入力", "URL を入力してください")
             return
         self._start_download(url)
 
     def _analyze_table(self) -> None:
-        # 再解析: 入力欄が空なら選択中を使う
-        url = self.url_input.text().strip() or self.url_list.currentText() or self._current_url
+        url = self.url_list.currentText().strip()
         if not url:
-            QMessageBox.warning(self, "未選択", "難易度表の URL を入力するか保存済みから選択してください")
-            return
-        if url in self._cached_results:
-            self._start_download(url, add_to_saved=False, force_refresh=True)
             return
         self._start_download(url, add_to_saved=False, force_refresh=True)
 
@@ -539,7 +534,7 @@ class DifficultyTab(QWidget):
             key = self._format_difficulty(analysis.difficulty)
             data.setdefault(key, []).append(value)
 
-        ordered_keys = sorted(data.keys(), key=self._difficulty_sort_key)
+        ordered_keys = sorted(data.keys(), key=difficulty_sort_key)
         scatter_points = []
         for key in ordered_keys:
             for v in data[key]:
@@ -553,17 +548,7 @@ class DifficultyTab(QWidget):
         else:
             self.box_chart.hide()
             self.difficulty_chart.show()
-            self.difficulty_chart.plot(scatter_points, y_label=metric)
-
-    def _difficulty_sort_key(self, value: str) -> float:
-        import re
-
-        # remove non-digit and dot to sort numerically; fallback to 0
-        digits = re.findall(r"[0-9]+(?:\\.[0-9]+)?", value)
-        try:
-            return float(digits[0]) if digits else float("inf")
-        except ValueError:
-            return float("inf")
+            self.difficulty_chart.plot(scatter_points, y_label=metric, order=ordered_keys, sort_key=difficulty_sort_key)
 
     def _render_summary(self) -> None:
         metric = self.metric_selector.currentText()
@@ -586,7 +571,7 @@ class DifficultyTab(QWidget):
             if analysis.total_value is not None and analysis.note_count:
                 rows[key]["rates"].append(analysis.total_value / analysis.note_count)
 
-        ordered = sorted(rows.keys(), key=self._difficulty_sort_key)
+        ordered = sorted(rows.keys(), key=difficulty_sort_key)
         if not ordered:
             self.summary_table.setRowCount(0)
             return

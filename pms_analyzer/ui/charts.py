@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -101,7 +101,14 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.ax.set_xlabel("難易度", color="white")
         self.ax.set_ylabel(y_label, color="white")
 
-    def plot(self, points: List[tuple[str, float]], *, y_label: str = "密度") -> None:
+    def plot(
+        self,
+        points: List[tuple[str, float]],
+        *,
+        y_label: str = "密度",
+        order: Optional[List[str]] = None,
+        sort_key: Optional[Callable[[str], object]] = None,
+    ) -> None:
         self.ax.clear()
         self._style_axes(y_label=y_label)
         if not points:
@@ -109,12 +116,13 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             return
 
         diffs = [p[0] for p in points]
-        densities = [p[1] for p in points]
-        unique = sorted({d for d in diffs}, key=lambda x: x)
+        unique = order if order is not None else sorted({d for d in diffs}, key=sort_key or (lambda x: x))
         pos_map = {val: idx for idx, val in enumerate(unique)}
-        x = [pos_map[d] for d in diffs]
-        colors = [self._color_for_density(v) for v in densities]
-        self.ax.scatter(x, densities, c=colors, alpha=0.85)
+        filtered = [(d, den) for d, den in points if d in pos_map]
+        x = [pos_map[d] for d, _ in filtered]
+        y_vals = [den for _, den in filtered]
+        colors = [self._color_for_density(den) for den in y_vals]
+        self.ax.scatter(x, y_vals, c=colors, alpha=0.85)
         self.ax.set_xticks(list(pos_map.values()), labels=unique)
         self.ax.grid(color="#444", linestyle=":", linewidth=0.5)
         self.figure.tight_layout()
