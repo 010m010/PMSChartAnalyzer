@@ -327,7 +327,6 @@ class DifficultyTab(QWidget):
             ["LEVEL", "解析済み譜面数", "最小", "Q1", "中央値", "最大", "Q3", "平均"]
         )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._level_filters: Dict[str, QCheckBox] = {}
         self.songdata_label = QLabel("songdata.db: 未設定")
         self._latest_analyses: List[ChartAnalysis] = []
         self._cached_results: Dict[str, List[ChartAnalysis]] = {}
@@ -338,6 +337,7 @@ class DifficultyTab(QWidget):
         self._current_url: Optional[str] = None
         self._worker: Optional[DifficultyTableWorker] = None
         self._build_ui()
+        self._available_levels: list[str] = []
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
@@ -731,8 +731,13 @@ class DifficultyTab(QWidget):
         scroll.setWidgetResizable(True)
         container = QWidget()
         container_layout = QVBoxLayout()
-        for cb in self._level_filters.values():
+        checkboxes: list[QCheckBox] = []
+        current_selection = self._filter_selection or set(self._available_levels)
+        for level in self._available_levels:
+            cb = QCheckBox(level)
+            cb.setChecked(level in current_selection)
             container_layout.addWidget(cb)
+            checkboxes.append(cb)
         container_layout.addStretch()
         container.setLayout(container_layout)
         scroll.setWidget(container)
@@ -742,11 +747,11 @@ class DifficultyTab(QWidget):
         layout.addWidget(buttons)
 
         def select_all() -> None:
-            for cb in self._level_filters.values():
+            for cb in checkboxes:
                 cb.setChecked(True)
 
         def clear_all() -> None:
-            for cb in self._level_filters.values():
+            for cb in checkboxes:
                 cb.setChecked(False)
 
         select_all_btn.clicked.connect(select_all)
@@ -755,7 +760,7 @@ class DifficultyTab(QWidget):
         buttons.rejected.connect(dialog.reject)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._filter_selection = {level for level, cb in self._level_filters.items() if cb.isChecked()}
+            self._filter_selection = {cb.text() for cb in checkboxes if cb.isChecked()}
             self._render_table_and_chart()
 
     def _is_difficulty_visible(self, difficulty: str) -> bool:
@@ -764,42 +769,10 @@ class DifficultyTab(QWidget):
         formatted = self._format_difficulty(difficulty)
         return formatted in self._filter_selection
 
-
-class SettingsTab(QWidget):
-    theme_changed = pyqtSignal(str)
-
-    def __init__(self, initial_mode: str, parent=None) -> None:
-        super().__init__(parent)
-        self._build_ui(initial_mode)
-
-    def _build_ui(self, initial_mode: str) -> None:
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("表示モード"))
-        self.button_group = QButtonGroup(self)
-        modes = [("システム設定に合わせる", "system"), ("ライトモード", "light"), ("ダークモード", "dark")]
-        for label, value in modes:
-            rb = QRadioButton(label)
-            rb.setChecked(value == initial_mode)
-            self.button_group.addButton(rb)
-            rb.setProperty("theme_value", value)
-            layout.addWidget(rb)
-        layout.addStretch()
-        self.setLayout(layout)
-        self.button_group.buttonToggled.connect(self._on_toggled)
-
-    def _on_toggled(self, button: QRadioButton, checked: bool) -> None:
-        if not checked:
-            return
-        value = button.property("theme_value")
-        if isinstance(value, str):
-            self.theme_changed.emit(value)
-
-    def set_mode(self, mode: str) -> None:
-        for btn in self.button_group.buttons():
-            value = btn.property("theme_value")
-            if value == mode:
-                btn.setChecked(True)
-                return
+    def _sync_filter_options(self) -> None:
+        self._available_levels = sorted({self._format_difficulty(a.difficulty) for a in self._latest_analyses}, key=difficulty_sort_key)
+        if not self._filter_selection:
+            self._filter_selection = set(self._available_levels)
 
 
 class MainWindow(QMainWindow):
@@ -816,11 +789,8 @@ class MainWindow(QMainWindow):
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
         self.single_tab = SingleAnalysisTab(self.parser, self)
         self.table_tab = DifficultyTab(self.parser, self)
-        self.settings_tab = SettingsTab(self.theme_mode, self)
-        self.settings_tab.theme_changed.connect(self._apply_theme_mode)
         self.tabs.addTab(self.single_tab, "単曲分析")
         self.tabs.addTab(self.table_tab, "難易度表")
-        self.tabs.addTab(self.settings_tab, "設定")
         self.setCentralWidget(self.tabs)
         self._load_config()
         self._build_menu()
@@ -836,16 +806,31 @@ class MainWindow(QMainWindow):
         set_path_action = QAction("songdata.db パスを指定", self)
         set_path_action.triggered.connect(self._select_songdata_path)
         settings_menu.addAction(set_path_action)
+        theme_menu = settings_menu.addMenu("カラーモード")
+        self.theme_action_group = QActionGroup(self)
+        themes = [("システム設定に合わせる", "system"), ("ライトモード", "light"), ("ダークモード", "dark")]
+        for label, value in themes:
+            action = QAction(label, self, checkable=True)
+            action.setData(value)
+            if value == self.theme_mode:
+                action.setChecked(True)
+            self.theme_action_group.addAction(action)
+            theme_menu.addAction(action)
+        self.theme_action_group.triggered.connect(self._on_theme_selected)
 
     def _apply_theme_mode(self, mode: str, *, save: bool = True) -> None:
         self.theme_mode = mode
         self.single_tab.set_theme_mode(mode)
         self.table_tab.set_theme_mode(mode)
-        self.settings_tab.set_mode(mode)
         if save:
             config = load_config()
             config["theme_mode"] = mode
             save_config(config)
+
+    def _on_theme_selected(self, action: QAction) -> None:
+        value = action.data()
+        if isinstance(value, str):
+            self._apply_theme_mode(value)
 
     def _select_songdata_path(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "songdata.db があるフォルダーを選択")
