@@ -385,10 +385,14 @@ class MainWindow(QMainWindow):
         self._handle_drop(event.mimeData().urls())
 
     def eventFilter(self, source, event):  # type: ignore[override]
-        if source is self.tabs and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+        if source is self.tabs and event.type() in (
+            QEvent.Type.DragEnter,
+            QEvent.Type.DragMove,
+            QEvent.Type.Drop,
+        ):
             if event.mimeData().hasUrls():
                 event.acceptProposedAction()
-                if event.type() == QEvent.Drop:
+                if event.type() == QEvent.Type.Drop:
                     self._handle_drop(event.mimeData().urls())
             return True
         return super().eventFilter(source, event)
