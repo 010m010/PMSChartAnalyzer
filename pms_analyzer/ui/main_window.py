@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QRadioButton,
     QButtonGroup,
+    QActionGroup,
 )
 import requests
 
