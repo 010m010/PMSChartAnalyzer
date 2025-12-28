@@ -417,6 +417,7 @@ class DifficultyTab(QWidget):
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.chart_type_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
+        self.ignore_outliers_checkbox.stateChanged.connect(self._refresh_chart_only)
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self._refresh_saved_urls()
@@ -596,13 +597,18 @@ class DifficultyTab(QWidget):
                 scatter_points.append((key, v))
         y_limits = None
         if self.ignore_outliers_checkbox.isChecked():
-            y_limits = self._compute_y_limits([v for _, v in scatter_points])
+            all_values = [v for _, v in scatter_points]
+            y_limits = self._compute_y_limits(all_values)
 
         # Toggle charts
         if self.chart_type_selector.currentText() == "箱ひげ図":
             self.difficulty_chart.hide()
             self.box_chart.show()
-            self.box_chart.plot({k: data[k] for k in ordered_keys}, metric, y_limits=y_limits)
+            box_data = {k: data[k] for k in ordered_keys}
+            if self.ignore_outliers_checkbox.isChecked():
+                flat = [val for vals in box_data.values() for val in vals]
+                y_limits = self._compute_y_limits(flat)
+            self.box_chart.plot(box_data, metric, y_limits=y_limits)
         else:
             self.box_chart.hide()
             self.difficulty_chart.show()
@@ -642,10 +648,16 @@ class DifficultyTab(QWidget):
 
         low = _percentile(0.05)
         high = _percentile(0.95)
+        global_min = sorted_vals[0]
+        global_max = sorted_vals[-1]
         if low == high:
             low *= 0.9
             high *= 1.1 if high != 0 else 1.0
-        return (low, high)
+        # Ensure the absolute min/max stay visible with a small margin
+        low = min(low, global_min)
+        high = max(high, global_max)
+        padding = (high - low) * 0.05 if high != low else 1.0
+        return (low - padding, high + padding)
 
     def _render_summary(self) -> None:
         metric = self.summary_metric_selector.currentText()
