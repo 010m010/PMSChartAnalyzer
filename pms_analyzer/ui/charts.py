@@ -7,7 +7,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 
-rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Noto Sans CJK JP", "IPAGothic", "sans-serif"]
+# Prefer Windows-installed Meiryo to avoid missing font warnings; fall back to common JP fonts.
+rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 
 matplotlib.use("Agg")
 
@@ -39,7 +40,6 @@ class StackedDensityChart(FigureCanvasQTAgg):
             return
 
         totals = [sum(row) for row in per_second_by_key]
-        max_val = max(totals) if totals else 0
         x = list(range(len(per_second_by_key)))
         colors = [self._color_for_density(val) for val in totals]
         self.ax.bar(x, totals, color=colors, width=0.9)
@@ -90,7 +90,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.setParent(parent)
         self._style_axes()
 
-    def _style_axes(self) -> None:
+    def _style_axes(self, y_label: str = "密度") -> None:
         self.ax.set_facecolor("black")
         self.ax.tick_params(axis="x", colors="white", rotation=45)
         self.ax.tick_params(axis="y", colors="white")
@@ -99,11 +99,11 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         for spine in ("top", "right"):
             self.ax.spines[spine].set_visible(False)
         self.ax.set_xlabel("難易度", color="white")
-        self.ax.set_ylabel("密度", color="white")
+        self.ax.set_ylabel(y_label, color="white")
 
-    def plot(self, points: List[tuple[str, float]]) -> None:
+    def plot(self, points: List[tuple[str, float]], *, y_label: str = "密度") -> None:
         self.ax.clear()
-        self._style_axes()
+        self._style_axes(y_label=y_label)
         if not points:
             self.draw()
             return

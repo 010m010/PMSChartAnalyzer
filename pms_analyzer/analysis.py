@@ -43,9 +43,9 @@ def compute_density(
     terminal_notes = [note for note in notes if note.time >= terminal_start]
     window = min(terminal_window, total_time)
     terminal_density = len(terminal_notes) / window if window > 0 else 0.0
-    # Mean of squared per-second densities (二乗平均密度)
+    # Root-mean-square of per-second densities
     rms_density = (
-        sum(val * val for val in per_second_total) / len(per_second_total)
+        (sum(val * val for val in per_second_total) / len(per_second_total)) ** 0.5
         if per_second_total
         else 0.0
     )

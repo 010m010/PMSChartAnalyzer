@@ -38,7 +38,7 @@ from ..difficulty_table import (
 )
 from ..pms_parser import PMSParser
 from ..storage import AnalysisRecord, add_saved_table, append_history, get_saved_tables, load_config, save_config
-from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
+from .charts import DifficultyScatterChart, StackedDensityChart
 
 
 class AnalysisWorker(QThread):
@@ -118,10 +118,27 @@ class SingleAnalysisTab(QWidget):
             "max_density": "秒間密度(最大)",
             "terminal_density": "終端秒間密度(終盤5秒平均)",
             "average_density": "平均密度(全体)",
-            "rms_density": "二乗平均密度",
+            "rms_density": "RMS",
         }
         for row, (key, title) in enumerate(labels.items()):
-            grid.addWidget(QLabel(title), row, 0)
+            if key == "rms_density":
+                title_label = QLabel(title)
+                info = QLabel("？")
+                info.setToolTip("秒間密度の二乗平均平方根。ゲージの増加量を加味しており、休憩地帯や局所難の影響を受けにくい。")
+                info.setFixedWidth(16)
+                info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                info.setStyleSheet(
+                    "QLabel { border: 1px solid #888; border-radius: 8px; background: #eee; color: #333; }"
+                )
+                info_layout = QHBoxLayout()
+                info_layout.addWidget(title_label)
+                info_layout.addWidget(info)
+                info_layout.addStretch()
+                container = QWidget()
+                container.setLayout(info_layout)
+                grid.addWidget(container, row, 0)
+            else:
+                grid.addWidget(QLabel(title), row, 0)
             value_label = QLabel("-")
             self.metrics_labels[key] = value_label
             grid.addWidget(value_label, row, 1)
@@ -202,7 +219,6 @@ class DifficultyTab(QWidget):
         super().__init__(parent)
         self.parser = parser
         self.table_label = QLabel("未読込")
-        self.box_plot = BoxPlotCanvas(self)
         self.difficulty_chart = DifficultyScatterChart(self)
         self.table_widget = QTableWidget(0, 10)
         self.table_widget.setHorizontalHeaderLabels(
@@ -225,6 +241,10 @@ class DifficultyTab(QWidget):
         self.url_input.setPlaceholderText("https://example.com/table.json など")
         self.url_list = QComboBox()
         self.url_list.setEditable(False)
+        self.metric_selector = QComboBox()
+        self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "RMS"])
+        self.songdata_label = QLabel("songdata.db: 未設定")
+        self._latest_analyses: List[ChartAnalysis] = []
         self._current_url: Optional[str] = None
         self._worker: Optional[DifficultyTableWorker] = None
         self._build_ui()
@@ -236,23 +256,27 @@ class DifficultyTab(QWidget):
         header_layout.addWidget(self.url_input, 2)
         header_layout.addWidget(self.load_button)
         header_layout.addWidget(self.analyze_button)
+        header_layout.addWidget(QLabel("縦軸:"))
+        header_layout.addWidget(self.metric_selector)
         layout.addLayout(header_layout)
 
         saved_layout = QHBoxLayout()
         saved_layout.addWidget(QLabel("保存済み:"))
         saved_layout.addWidget(self.url_list, 1)
         saved_layout.addWidget(self.table_label)
+        saved_layout.addWidget(self.songdata_label)
         layout.addLayout(saved_layout)
 
         layout.addWidget(self.table_widget)
         layout.addWidget(self.difficulty_chart)
-        layout.addWidget(self.box_plot)
         self.setLayout(layout)
 
         self.load_button.clicked.connect(self._select_table)
         self.analyze_button.clicked.connect(self._analyze_table)
         self.url_list.currentTextChanged.connect(self._on_select_saved)
+        self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self._refresh_saved_urls()
+        self._refresh_songdata_label()
 
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
@@ -274,6 +298,7 @@ class DifficultyTab(QWidget):
         density_by_diff: Dict[str, List[float]] = {}
         scatter_points: List[tuple[str, float]] = []
         self.table_widget.setRowCount(len(analyses))
+        self._latest_analyses = analyses
         for row, analysis in enumerate(analyses):
             entry = analysis.entry
             density = analysis.density
@@ -294,8 +319,7 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 8, QTableWidgetItem(analysis.sha256 or ""))
             self.table_widget.setItem(row, 9, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
-        self.box_plot.plot(density_by_diff, "秒間密度(最大)")
-        self.difficulty_chart.plot(scatter_points)
+        self._render_chart()
         self.table_label.setText(f"解析済み: {table.name}")
 
     def _on_failed(self, error_message: str) -> None:
@@ -310,14 +334,33 @@ class DifficultyTab(QWidget):
         self.load_button.setEnabled(False)
         self._current_url = url
         config = load_config()
-        beatoraja_base = Path(config["beatoraja_path"]) if config.get("beatoraja_path") else None
-        songdata_db = beatoraja_base / "songdata.db" if beatoraja_base else None
-        self._worker = DifficultyTableWorker(self.parser, url, name, songdata_db=songdata_db, beatoraja_base=beatoraja_base)
+        songdata_dir = Path(config["songdata_dir"]) if config.get("songdata_dir") else None
+        songdata_db = songdata_dir / "songdata.db" if songdata_dir else None
+        if songdata_db and not songdata_db.exists():
+            QMessageBox.critical(self, "songdata.db なし", f"songdata.db が見つかりませんでした: {songdata_db}")
+            self.analyze_button.setEnabled(True)
+            self.load_button.setEnabled(True)
+            return
+        if songdata_db:
+            try:
+                import sqlite3
+
+                con = sqlite3.connect(str(songdata_db))
+                con.close()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "songdata.db 読み込み失敗", f"songdata.db を開けませんでした: {exc}")
+                self.analyze_button.setEnabled(True)
+                self.load_button.setEnabled(True)
+                return
+        self._worker = DifficultyTableWorker(
+            self.parser, url, name, songdata_db=songdata_db, beatoraja_base=songdata_dir
+        )
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
         add_saved_table(url)
         self._refresh_saved_urls()
+        self._refresh_songdata_label()
 
     def _refresh_saved_urls(self) -> None:
         self.url_list.clear()
@@ -327,6 +370,27 @@ class DifficultyTab(QWidget):
     def _on_select_saved(self, value: str) -> None:
         if value:
             self.url_input.setText(value)
+
+    def _refresh_chart_only(self) -> None:
+        if not self._latest_analyses:
+            return
+        self._render_chart()
+
+    def _render_chart(self) -> None:
+        metric = self.metric_selector.currentText()
+        scatter_points: List[tuple[str, float]] = []
+        for analysis in self._latest_analyses:
+            density = analysis.density
+            if metric == "総NOTES":
+                value = analysis.note_count
+            elif metric == "終端密度":
+                value = density.terminal_density
+            elif metric == "RMS":
+                value = density.rms_density
+            else:
+                value = density.average_density
+            scatter_points.append((analysis.difficulty, float(value)))
+        self.difficulty_chart.plot(scatter_points, y_label=metric)
 
 
 class MainWindow(QMainWindow):
@@ -356,22 +420,23 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
 
         settings_menu = menu.addMenu("設定")
-        set_path_action = QAction("beatoraja パスを指定", self)
-        set_path_action.triggered.connect(self._select_beatoraja_path)
+        set_path_action = QAction("songdata.db パスを指定", self)
+        set_path_action.triggered.connect(self._select_songdata_path)
         settings_menu.addAction(set_path_action)
 
-    def _select_beatoraja_path(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "beatoraja フォルダーを選択")
+    def _select_songdata_path(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "songdata.db があるフォルダーを選択")
         if directory:
             config = load_config()
-            config["beatoraja_path"] = directory
+            config["songdata_dir"] = directory
             save_config(config)
-            QMessageBox.information(self, "保存", "beatoraja のパスを保存しました")
+            self._refresh_songdata_label()
+            QMessageBox.information(self, "保存", "songdata.db のパスを保存しました")
 
     def _load_config(self) -> None:
         config = load_config()
-        if config.get("beatoraja_path"):
-            self.statusBar().showMessage(f"beatoraja: {config['beatoraja_path']}")
+        if config.get("songdata_dir"):
+            self.statusBar().showMessage(f"songdata.db: {config['songdata_dir']}")
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
@@ -404,6 +469,14 @@ class MainWindow(QMainWindow):
                 self.single_tab.load_file(path)
             else:
                 QMessageBox.warning(self, "不正な形式", ".pms または .bms ファイルを指定してください")
+
+    def _refresh_songdata_label(self) -> None:
+        config = load_config()
+        songdata_dir = config.get("songdata_dir")
+        if songdata_dir:
+            self.songdata_label.setText(f"songdata.db: {songdata_dir}")
+        else:
+            self.songdata_label.setText("songdata.db: 未設定")
 
 
 def run_app() -> None:
