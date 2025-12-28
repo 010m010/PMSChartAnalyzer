@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 from urllib.parse import urljoin
+from urllib3.util import Retry
 
 import sqlite3
 
@@ -93,7 +94,7 @@ def analyze_table(
         resolved_path = _resolve_entry_path(entry, songdata_db=songdata_db, beatoraja_base=beatoraja_base)
 
         if resolved_path is None:
-            density = DensityResult([], [], 0.0, 0.0, 0.0, 0.0)
+            density = DensityResult([], [], 0.0, 0.0, 0.0, 0.0, 0.0)
             analyses.append(
                 ChartAnalysis(
                     difficulty=entry.difficulty,
@@ -288,7 +289,18 @@ def _load_bms_table_from_html(name: str, html: str, *, base_dir: Path, source_ur
 def _fetch_url(url: str) -> str:
     import requests
 
-    resp = requests.get(url, timeout=15)
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=1.5,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+    )
+    adapter = requests.adapters.HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    resp = session.get(url, timeout=30, headers={"User-Agent": "PMSChartAnalyzer/1.0"})
     resp.raise_for_status()
     resp.encoding = resp.apparent_encoding or resp.encoding
     return resp.text
