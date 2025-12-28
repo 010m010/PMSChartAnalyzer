@@ -5,21 +5,9 @@ from typing import Dict, List
 import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from matplotlib import cm
 
 matplotlib.use("Agg")
-
-
-KEY_COLORS = [
-    "#5DA5DA",
-    "#FAA43A",
-    "#60BD68",
-    "#F17CB0",
-    "#B2912F",
-    "#B276B2",
-    "#DECF3F",
-    "#F15854",
-    "#4D4D4D",
-]
 
 
 class StackedDensityChart(FigureCanvasQTAgg):
@@ -48,24 +36,22 @@ class StackedDensityChart(FigureCanvasQTAgg):
             self.draw()
             return
 
+        totals = [sum(row) for row in per_second_by_key]
+        max_val = max(totals) if totals else 0
         x = list(range(len(per_second_by_key)))
-        bottom = [0 for _ in x]
-        for key_index in range(9):
-            heights = [row[key_index] for row in per_second_by_key]
-            self.ax.bar(
-                x,
-                heights,
-                bottom=bottom,
-                color=KEY_COLORS[key_index],
-                width=0.9,
-                label=f"Key {key_index + 1}",
-            )
-            bottom = [b + h for b, h in zip(bottom, heights)]
-
-        self.ax.legend(facecolor="black", labelcolor="white", loc="upper right", fontsize="small")
+        colors = [self._color_for_density(val) for val in totals]
+        self.ax.bar(x, totals, color=colors, width=0.9)
         self.ax.grid(color="#444", linestyle=":", linewidth=0.5)
+        self.ax.set_title("秒間密度", color="white")
         self.figure.tight_layout()
         self.draw()
+
+    def _color_for_density(self, density: int) -> str:
+        # Bucket every 10 density and map to a perceptually-uniform colormap
+        bucket = min(density // 10, 9)
+        cmap = cm.get_cmap("plasma", 10)
+        r, g, b, _ = cmap(bucket)
+        return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
@@ -91,4 +77,4 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.draw()
 
 
-__all__ = ["StackedDensityChart", "BoxPlotCanvas", "KEY_COLORS"]
+__all__ = ["StackedDensityChart", "BoxPlotCanvas"]

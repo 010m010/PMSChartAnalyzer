@@ -5,17 +5,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
-KEY_CHANNELS: Dict[int, int] = {
-    11: 0,
-    12: 1,
-    13: 2,
-    14: 3,
-    15: 4,
-    16: 5,
-    17: 6,
-    18: 7,
-    19: 8,
-}
+
+def _build_key_channels() -> Dict[int, int]:
+    """Map PMS/BMS channels to 9key lanes.
+
+    Pop'n Music 9key-style PMS files can place notes on multiple channel sets:
+    - 11-19: primary 1P lanes
+    - 21-29: secondary set (some creators/exporters use these)
+    - 51-59: long-note channels (treated as standard notes for density)
+    """
+
+    mapping: Dict[int, int] = {}
+    for base in (10, 20, 50):
+        for offset, key_index in enumerate(range(1, 10)):
+            mapping[base + key_index] = offset
+    return mapping
+
+
+KEY_CHANNELS: Dict[int, int] = _build_key_channels()
 
 
 @dataclass

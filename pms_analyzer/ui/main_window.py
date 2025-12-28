@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDragMoveEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -24,12 +24,18 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QComboBox,
 )
+import requests
 
 from ..analysis import DensityResult, compute_density
-from ..difficulty_table import DifficultyEntry, DifficultyTable, analyze_table, load_difficulty_table
+from ..difficulty_table import (
+    DifficultyTable,
+    analyze_table,
+    load_difficulty_table_from_content,
+)
 from ..pms_parser import PMSParser
-from ..storage import AnalysisRecord, append_history, load_config, save_config
+from ..storage import AnalysisRecord, add_saved_table, append_history, get_saved_tables, load_config, save_config
 from .charts import BoxPlotCanvas, StackedDensityChart
 
 
@@ -56,15 +62,20 @@ class DifficultyTableWorker(QThread):
     finished = pyqtSignal(object, object)
     failed = pyqtSignal(str)
 
-    def __init__(self, parser: PMSParser, table: DifficultyTable):
+    def __init__(self, parser: PMSParser, table_source: str, saved_name: str):
         super().__init__()
         self.parser = parser
-        self.table = table
+        self.table_source = table_source
+        self.saved_name = saved_name
 
     def run(self) -> None:  # type: ignore[override]
         try:
-            analyses = analyze_table(self.table, self.parser)
-            self.finished.emit(self.table, analyses)
+            response = requests.get(self.table_source, timeout=15)
+            response.raise_for_status()
+            suffix = ".json" if self.table_source.lower().endswith(".json") else ".csv"
+            table = load_difficulty_table_from_content(self.saved_name, response.text, suffix)
+            analyses = analyze_table(table, self.parser)
+            self.finished.emit(table, analyses)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc())
 
@@ -166,6 +177,10 @@ class SingleAnalysisTab(QWidget):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
     def dropEvent(self, event: QDropEvent) -> None:  # type: ignore[override]
         urls = event.mimeData().urls()
         if urls:
@@ -186,18 +201,28 @@ class DifficultyTab(QWidget):
         self.table_widget.setHorizontalHeaderLabels(["難易度", "譜面数", "平均密度", "終端密度"])
         self.load_button = QPushButton("難易度表を読み込む")
         self.analyze_button = QPushButton("一括解析")
-        self._table: Optional[DifficultyTable] = None
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://example.com/table.json など")
+        self.url_list = QComboBox()
+        self.url_list.setEditable(False)
+        self._current_url: Optional[str] = None
         self._worker: Optional[DifficultyTableWorker] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
         header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("URL:"))
+        header_layout.addWidget(self.url_input, 2)
         header_layout.addWidget(self.load_button)
         header_layout.addWidget(self.analyze_button)
-        header_layout.addWidget(QLabel("読込中:"))
-        header_layout.addWidget(self.table_label, 1)
         layout.addLayout(header_layout)
+
+        saved_layout = QHBoxLayout()
+        saved_layout.addWidget(QLabel("保存済み:"))
+        saved_layout.addWidget(self.url_list, 1)
+        saved_layout.addWidget(self.table_label)
+        layout.addLayout(saved_layout)
 
         layout.addWidget(self.table_widget)
         layout.addWidget(self.box_plot)
@@ -205,30 +230,26 @@ class DifficultyTab(QWidget):
 
         self.load_button.clicked.connect(self._select_table)
         self.analyze_button.clicked.connect(self._analyze_table)
+        self.url_list.currentTextChanged.connect(self._on_select_saved)
+        self._refresh_saved_urls()
 
     def _select_table(self) -> None:
-        file_name, _ = QFileDialog.getOpenFileName(self, "難易度表ファイル", "", "CSV/JSON (*.csv *.json)")
-        if file_name:
-            base_dir = Path(file_name).parent
-            try:
-                self._table = load_difficulty_table(file_name, base_dir=base_dir)
-                self.table_label.setText(Path(file_name).name)
-            except Exception as exc:  # noqa: BLE001
-                QMessageBox.critical(self, "読み込み失敗", str(exc))
+        url = self.url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "未入力", "URL を入力してください")
+            return
+        self._start_download(url)
 
     def _analyze_table(self) -> None:
-        if not self._table:
+        url = self._current_url
+        if not url:
             QMessageBox.warning(self, "未選択", "先に難易度表を読み込んでください")
             return
-        self._worker = DifficultyTableWorker(self.parser, self._table)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.start()
-        self.analyze_button.setEnabled(False)
-        self.table_label.setText(f"解析中: {self._table.name}")
+        self._start_download(url)
 
     def _on_finished(self, table: DifficultyTable, analyses: List) -> None:
         self.analyze_button.setEnabled(True)
+        self.load_button.setEnabled(True)
         grouped: Dict[str, List[float]] = {}
         self.table_widget.setRowCount(len(analyses))
         for row, analysis in enumerate(analyses):
@@ -246,7 +267,30 @@ class DifficultyTab(QWidget):
 
     def _on_failed(self, error_message: str) -> None:
         self.analyze_button.setEnabled(True)
+        self.load_button.setEnabled(True)
         QMessageBox.critical(self, "エラー", error_message)
+
+    def _start_download(self, url: str) -> None:
+        name = Path(url).stem or "table"
+        self.table_label.setText(url)
+        self.analyze_button.setEnabled(False)
+        self.load_button.setEnabled(False)
+        self._current_url = url
+        self._worker = DifficultyTableWorker(self.parser, url, name)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.start()
+        add_saved_table(url)
+        self._refresh_saved_urls()
+
+    def _refresh_saved_urls(self) -> None:
+        self.url_list.clear()
+        urls = get_saved_tables()
+        self.url_list.addItems(urls)
+
+    def _on_select_saved(self, value: str) -> None:
+        if value:
+            self.url_input.setText(value)
 
 
 class MainWindow(QMainWindow):
@@ -254,6 +298,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PMS Chart Analyzer")
         self.resize(1100, 720)
+        self.setAcceptDrops(True)
         self.parser = PMSParser()
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
@@ -289,6 +334,23 @@ class MainWindow(QMainWindow):
         config = load_config()
         if config.get("beatoraja_path"):
             self.statusBar().showMessage(f"beatoraja: {config['beatoraja_path']}")
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # type: ignore[override]
+        urls = event.mimeData().urls()
+        if urls:
+            path = Path(urls[0].toLocalFile())
+            if path.suffix.lower() in {".pms", ".bms"}:
+                self.single_tab.load_file(path)
+            else:
+                QMessageBox.warning(self, "不正な形式", ".pms または .bms ファイルを指定してください")
 
 
 def run_app() -> None:
