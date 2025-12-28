@@ -32,6 +32,7 @@ class DifficultyEntry:
 class DifficultyTable:
     name: str
     entries: List[DifficultyEntry]
+    symbol: str | None = None
 
 
 @dataclass
@@ -248,6 +249,7 @@ def _load_bms_table_from_html(name: str, html: str, *, base_dir: Path, source_ur
         raise ValueError(f"Failed to load bmstable songlist: {exc}") from exc
 
     entries: List[DifficultyEntry] = []
+    symbol = header.get("symbol")
     for song in songs:
         diff = str(song.get("level") or song.get("difficulty") or song.get("lr2level") or "Unknown")
         title = song.get("title") or "Unknown"
@@ -275,7 +277,7 @@ def _load_bms_table_from_html(name: str, html: str, *, base_dir: Path, source_ur
             )
         )
 
-    return DifficultyTable(name=header.get("name") or name, entries=entries)
+    return DifficultyTable(name=header.get("name") or name, entries=entries, symbol=symbol)
 
 
 def _fetch_url(url: str) -> str:
