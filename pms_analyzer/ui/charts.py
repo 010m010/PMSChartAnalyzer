@@ -13,6 +13,8 @@ rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 
 matplotlib.use("Agg")
 
+ThemeMode = str  # "system", "light", "dark"
+
 
 class StackedDensityChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -20,12 +22,22 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.ax = self.figure.add_subplot(111)
         super().__init__(self.figure)
         self.setParent(parent)
+        self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
 
     def _is_dark_mode(self) -> bool:
+        if self.theme_mode == "dark":
+            return True
+        if self.theme_mode == "light":
+            return False
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
+
+    def set_theme_mode(self, mode: ThemeMode) -> None:
+        self.theme_mode = mode
+        self._style_axes(dark=self._is_dark_mode())
+        self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
         face = "black" if dark else "white"
@@ -78,11 +90,21 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.ax = self.figure.add_subplot(111)
         super().__init__(self.figure)
         self.setParent(parent)
+        self.theme_mode: ThemeMode = "system"
 
     def _is_dark_mode(self) -> bool:
+        if self.theme_mode == "dark":
+            return True
+        if self.theme_mode == "light":
+            return False
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
+
+    def set_theme_mode(self, mode: ThemeMode) -> None:
+        self.theme_mode = mode
+        self._style_axes(dark=self._is_dark_mode())
+        self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
         face = "black" if dark else "white"
@@ -100,7 +122,7 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.ax.set_ylabel(self.ax.get_ylabel(), color=text)
         self.ax.grid(True, linestyle=":", linewidth=0.5, color=grid)
 
-    def plot(self, values: Dict[str, List[float]], metric_name: str) -> None:
+    def plot(self, values: Dict[str, List[float]], metric_name: str, *, y_limits: Optional[tuple[float, float]] = None) -> None:
         self.ax.clear()
         dark = self._is_dark_mode()
         if not values:
@@ -113,6 +135,8 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.ax.set_title(f"{metric_name} の分布")
         self.ax.set_ylabel(metric_name)
         self._style_axes(dark=dark)
+        if y_limits:
+            self.ax.set_ylim(*y_limits)
         self.figure.tight_layout()
         self.draw()
 
@@ -123,12 +147,22 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.ax = self.figure.add_subplot(111)
         super().__init__(self.figure)
         self.setParent(parent)
+        self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
 
     def _is_dark_mode(self) -> bool:
+        if self.theme_mode == "dark":
+            return True
+        if self.theme_mode == "light":
+            return False
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
+
+    def set_theme_mode(self, mode: ThemeMode) -> None:
+        self.theme_mode = mode
+        self._style_axes(dark=self._is_dark_mode())
+        self.draw()
 
     def _style_axes(self, y_label: str = "密度", *, dark: bool) -> None:
         face = "black" if dark else "white"
@@ -153,6 +187,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         y_label: str = "密度",
         order: Optional[List[str]] = None,
         sort_key: Optional[Callable[[str], object]] = None,
+        y_limits: Optional[tuple[float, float]] = None,
     ) -> None:
         self.ax.clear()
         dark = self._is_dark_mode()
@@ -167,11 +202,13 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         filtered = [(d, den) for d, den in points if d in pos_map]
         x = [pos_map[d] for d, _ in filtered]
         y_vals = [den for _, den in filtered]
-        colors = [self._color_for_density(den) for den in y_vals]
-        self.ax.scatter(x, y_vals, c=colors, alpha=0.85)
+        marker_color = "#66CCFF" if dark else "#0066CC"
+        self.ax.scatter(x, y_vals, c=marker_color, alpha=0.85)
         self.ax.set_xticks(list(pos_map.values()), labels=unique)
         grid = "#444" if dark else "#ccc"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
+        if y_limits:
+            self.ax.set_ylim(*y_limits)
         self.figure.tight_layout()
         self.draw()
 

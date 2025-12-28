@@ -28,6 +28,12 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QAbstractItemView,
     QSplitter,
+    QDialog,
+    QDialogButtonBox,
+    QCheckBox,
+    QScrollArea,
+    QRadioButton,
+    QButtonGroup,
 )
 import requests
 
@@ -205,6 +211,10 @@ class SingleAnalysisTab(QWidget):
 
         self.analyze_button.clicked.connect(self._open_file_dialog)
 
+    def set_theme_mode(self, mode: str) -> None:
+        self.chart.set_theme_mode(mode)
+        self.chart.draw()
+
     def _open_file_dialog(self) -> None:
         file_name, _ = QFileDialog.getOpenFileName(self, "PMS ファイルを開く", "", "PMS Files (*.pms *.bms)")
         if file_name:
@@ -307,13 +317,17 @@ class DifficultyTab(QWidget):
         self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "終端RMS", "RMS"])
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["散布図", "箱ひげ図"])
+        self.ignore_outliers_checkbox = QCheckBox("外れ値をスケールに含めない")
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(["総NOTES", "増加率", "平均密度", "終端密度", "終端RMS", "RMS"])
+        self.filter_button = QPushButton("絞り込み")
+        self._filter_selection: set[str] = set()
         self.summary_table = QTableWidget(0, 8)
         self.summary_table.setHorizontalHeaderLabels(
             ["LEVEL", "解析済み譜面数", "最小", "Q1", "中央値", "最大", "Q3", "平均"]
         )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._level_filters: Dict[str, QCheckBox] = {}
         self.songdata_label = QLabel("songdata.db: 未設定")
         self._latest_analyses: List[ChartAnalysis] = []
         self._cached_results: Dict[str, List[ChartAnalysis]] = {}
@@ -338,6 +352,7 @@ class DifficultyTab(QWidget):
         saved_layout.addWidget(self.url_list, 1)
         saved_layout.addWidget(self.analyze_button)
         saved_layout.addWidget(self.delete_button)
+        saved_layout.addWidget(self.filter_button)
         layout.addLayout(saved_layout)
 
         layout.addWidget(self.loading_label)
@@ -361,6 +376,7 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.metric_selector)
         metric_layout.addWidget(QLabel("グラフ:"))
         metric_layout.addWidget(self.chart_type_selector)
+        metric_layout.addWidget(self.ignore_outliers_checkbox)
 
         chart_area = QWidget()
         chart_area_layout = QVBoxLayout()
@@ -402,8 +418,14 @@ class DifficultyTab(QWidget):
         self.chart_type_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
         self.delete_button.clicked.connect(self._delete_saved)
+        self.filter_button.clicked.connect(self._open_filter_dialog)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
+
+    def set_theme_mode(self, mode: str) -> None:
+        self.difficulty_chart.set_theme_mode(mode)
+        self.box_chart.set_theme_mode(mode)
+        self._render_chart()
 
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
@@ -481,6 +503,7 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = cached
                 self._current_symbol = self._cached_symbols.get(urls[0], "")
                 self._render_table_and_chart()
+                self._sync_filter_options()
 
     def _on_select_saved(self, value: str) -> None:
         if value:
@@ -489,6 +512,7 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = self._cached_results[value]
                 self._current_symbol = self._cached_symbols.get(value, "")
                 self._render_table_and_chart()
+                self._sync_filter_options()
 
     def _delete_saved(self) -> None:
         current = self.url_list.currentText()
@@ -515,8 +539,9 @@ class DifficultyTab(QWidget):
 
     def _render_table_and_chart(self) -> None:
         analyses = self._latest_analyses
-        self.table_widget.setRowCount(len(analyses))
-        for row, analysis in enumerate(analyses):
+        visible = [a for a in analyses if self._is_difficulty_visible(a.difficulty)]
+        self.table_widget.setRowCount(len(visible))
+        for row, analysis in enumerate(visible):
             entry = analysis.entry
             density = analysis.density
             difficulty_display = self._format_difficulty(analysis.difficulty)
@@ -542,6 +567,7 @@ class DifficultyTab(QWidget):
 
         self._render_chart()
         self._render_summary()
+        self._sync_filter_options()
 
     def _format_difficulty(self, value: str) -> str:
         symbol = self._current_symbol or ""
@@ -553,6 +579,10 @@ class DifficultyTab(QWidget):
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
         for analysis in self._latest_analyses:
+            if not self._is_difficulty_visible(analysis.difficulty):
+                continue
+            if not analysis.resolved_path or not analysis.density.per_second_total:
+                continue
             value = self._metric_value(analysis, metric)
             if value is None:
                 continue
@@ -564,16 +594,21 @@ class DifficultyTab(QWidget):
         for key in ordered_keys:
             for v in data[key]:
                 scatter_points.append((key, v))
+        y_limits = None
+        if self.ignore_outliers_checkbox.isChecked():
+            y_limits = self._compute_y_limits([v for _, v in scatter_points])
 
         # Toggle charts
         if self.chart_type_selector.currentText() == "箱ひげ図":
             self.difficulty_chart.hide()
             self.box_chart.show()
-            self.box_chart.plot({k: data[k] for k in ordered_keys}, metric)
+            self.box_chart.plot({k: data[k] for k in ordered_keys}, metric, y_limits=y_limits)
         else:
             self.box_chart.hide()
             self.difficulty_chart.show()
-            self.difficulty_chart.plot(scatter_points, y_label=metric, order=ordered_keys, sort_key=difficulty_sort_key)
+            self.difficulty_chart.plot(
+                scatter_points, y_label=metric, order=ordered_keys, sort_key=difficulty_sort_key, y_limits=y_limits
+            )
 
     def _metric_value(self, analysis: ChartAnalysis, metric: str) -> float | None:
         density = analysis.density
@@ -591,10 +626,35 @@ class DifficultyTab(QWidget):
             return None
         return density.average_density
 
+    def _compute_y_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
+        if not values:
+            return None
+        sorted_vals = sorted(values)
+        if len(sorted_vals) == 1:
+            val = sorted_vals[0]
+            return (val * 0.9, val * 1.1 if val != 0 else 1.0)
+
+        def _percentile(p: float) -> float:
+            k = (len(sorted_vals) - 1) * p
+            f = int(k)
+            c = min(f + 1, len(sorted_vals) - 1)
+            return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
+
+        low = _percentile(0.05)
+        high = _percentile(0.95)
+        if low == high:
+            low *= 0.9
+            high *= 1.1 if high != 0 else 1.0
+        return (low, high)
+
     def _render_summary(self) -> None:
         metric = self.summary_metric_selector.currentText()
         rows = {}
         for analysis in self._latest_analyses:
+            if not self._is_difficulty_visible(analysis.difficulty):
+                continue
+            if not analysis.resolved_path or not analysis.density.per_second_total:
+                continue
             key = self._format_difficulty(analysis.difficulty)
             rows.setdefault(key, {"values": [], "total": 0, "parsed": 0})
             rows[key]["total"] += 1
@@ -623,6 +683,108 @@ class DifficultyTab(QWidget):
                 text = "-" if val is None else f"{val:.2f}"
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
+    def _sync_filter_options(self) -> None:
+        difficulties = {self._format_difficulty(a.difficulty) for a in self._latest_analyses}
+        # Preserve existing checkbox states
+        for level in list(self._level_filters.keys()):
+            if level not in difficulties:
+                self._level_filters.pop(level)
+        for level in sorted(difficulties, key=difficulty_sort_key):
+            if level not in self._level_filters:
+                cb = QCheckBox(level)
+                cb.setChecked(True)
+                self._level_filters[level] = cb
+        # Remove filters that were deselected but no longer exist
+        self._filter_selection = {level for level, cb in self._level_filters.items() if cb.isChecked()}
+
+    def _open_filter_dialog(self) -> None:
+        self._sync_filter_options()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("LEVEL を絞り込み")
+        layout = QVBoxLayout(dialog)
+
+        toggle_layout = QHBoxLayout()
+        select_all_btn = QPushButton("すべて選択")
+        clear_all_btn = QPushButton("すべて解除")
+        toggle_layout.addWidget(select_all_btn)
+        toggle_layout.addWidget(clear_all_btn)
+        toggle_layout.addStretch()
+        layout.addLayout(toggle_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        container_layout = QVBoxLayout()
+        for cb in self._level_filters.values():
+            container_layout.addWidget(cb)
+        container_layout.addStretch()
+        container.setLayout(container_layout)
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+
+        def select_all() -> None:
+            for cb in self._level_filters.values():
+                cb.setChecked(True)
+
+        def clear_all() -> None:
+            for cb in self._level_filters.values():
+                cb.setChecked(False)
+
+        select_all_btn.clicked.connect(select_all)
+        clear_all_btn.clicked.connect(clear_all)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._filter_selection = {level for level, cb in self._level_filters.items() if cb.isChecked()}
+            self._render_table_and_chart()
+
+    def _is_difficulty_visible(self, difficulty: str) -> bool:
+        if not self._filter_selection:
+            return True
+        formatted = self._format_difficulty(difficulty)
+        return formatted in self._filter_selection
+
+
+class SettingsTab(QWidget):
+    theme_changed = pyqtSignal(str)
+
+    def __init__(self, initial_mode: str, parent=None) -> None:
+        super().__init__(parent)
+        self._build_ui(initial_mode)
+
+    def _build_ui(self, initial_mode: str) -> None:
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("表示モード"))
+        self.button_group = QButtonGroup(self)
+        modes = [("システム設定に合わせる", "system"), ("ライトモード", "light"), ("ダークモード", "dark")]
+        for label, value in modes:
+            rb = QRadioButton(label)
+            rb.setChecked(value == initial_mode)
+            self.button_group.addButton(rb)
+            rb.setProperty("theme_value", value)
+            layout.addWidget(rb)
+        layout.addStretch()
+        self.setLayout(layout)
+        self.button_group.buttonToggled.connect(self._on_toggled)
+
+    def _on_toggled(self, button: QRadioButton, checked: bool) -> None:
+        if not checked:
+            return
+        value = button.property("theme_value")
+        if isinstance(value, str):
+            self.theme_changed.emit(value)
+
+    def set_mode(self, mode: str) -> None:
+        for btn in self.button_group.buttons():
+            value = btn.property("theme_value")
+            if value == mode:
+                btn.setChecked(True)
+                return
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -631,14 +793,18 @@ class MainWindow(QMainWindow):
         self.resize(1100, 720)
         self.setAcceptDrops(True)
         self.parser = PMSParser()
+        self.theme_mode = "system"
         self.tabs = QTabWidget()
         self.tabs.setAcceptDrops(True)
         self.tabs.installEventFilter(self)
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
         self.single_tab = SingleAnalysisTab(self.parser, self)
         self.table_tab = DifficultyTab(self.parser, self)
+        self.settings_tab = SettingsTab(self.theme_mode, self)
+        self.settings_tab.theme_changed.connect(self._apply_theme_mode)
         self.tabs.addTab(self.single_tab, "単曲分析")
         self.tabs.addTab(self.table_tab, "難易度表")
+        self.tabs.addTab(self.settings_tab, "設定")
         self.setCentralWidget(self.tabs)
         self._load_config()
         self._build_menu()
@@ -655,6 +821,16 @@ class MainWindow(QMainWindow):
         set_path_action.triggered.connect(self._select_songdata_path)
         settings_menu.addAction(set_path_action)
 
+    def _apply_theme_mode(self, mode: str, *, save: bool = True) -> None:
+        self.theme_mode = mode
+        self.single_tab.set_theme_mode(mode)
+        self.table_tab.set_theme_mode(mode)
+        self.settings_tab.set_mode(mode)
+        if save:
+            config = load_config()
+            config["theme_mode"] = mode
+            save_config(config)
+
     def _select_songdata_path(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "songdata.db があるフォルダーを選択")
         if directory:
@@ -666,6 +842,9 @@ class MainWindow(QMainWindow):
 
     def _load_config(self) -> None:
         config = load_config()
+        if config.get("theme_mode"):
+            self.theme_mode = config["theme_mode"]
+        self._apply_theme_mode(self.theme_mode, save=False)
         if config.get("songdata_dir"):
             self.statusBar().showMessage(f"songdata.db: {config['songdata_dir']}")
             self.table_tab.refresh_songdata_label()
