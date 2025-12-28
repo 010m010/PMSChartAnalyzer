@@ -48,3 +48,20 @@ def test_hex_bpm_parsing(tmp_path: Path) -> None:
     # BPM hex 0x78 -> 120, so spacing should keep measure roughly 2 seconds
     assert result.total_time >= 1.9
     assert len(result.notes) == 2
+
+
+def test_skipped_measures_accumulate_time(tmp_path: Path) -> None:
+    content = """
+#BPM 120
+#00011:0100
+#00211:0001
+    """.strip()
+    file_path = tmp_path / "skip.pms"
+    file_path.write_text(content, encoding="utf-8")
+
+    parser = PMSParser()
+    result = parser.parse(file_path)
+
+    # Two measures with BPM 120 => ~2 seconds per measure, so skipping #001 should advance time
+    # Last note is in measure 2 (0-indexed 002), so expect roughly 4 seconds total
+    assert result.total_time >= 3.5

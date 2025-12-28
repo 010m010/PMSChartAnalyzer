@@ -147,8 +147,14 @@ class PMSParser:
         current_time = 0.0
         current_bpm = base_bpm
         notes: List[Note] = []
+        previous_measure = -1
 
         for measure in sorted(measures.keys()):
+            # Skip missing measures while keeping BPM
+            for missing in range(previous_measure + 1, measure):
+                gap_length = measure_lengths.get(missing, 1.0)
+                current_time += self._position_to_seconds(1.0, current_bpm, gap_length)
+
             events = self._expand_measure_events(measures[measure], bpm_defs)
             measure_length = measure_lengths.get(measure, 1.0)
             events.sort(key=lambda item: (item[0], 0 if item[1] == "bpm" else 1))
@@ -165,6 +171,7 @@ class PMSParser:
                     notes.append(Note(time=current_time, key_index=value))
 
             current_time += self._position_to_seconds(1.0 - previous_position, current_bpm, measure_length)
+            previous_measure = measure
 
         notes.sort(key=lambda n: n.time)
         return notes, current_time
