@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from statistics import mean
 
 from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
+from PyQt6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -34,7 +34,6 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QRadioButton,
     QButtonGroup,
-    QActionGroup,
 )
 import requests
 
