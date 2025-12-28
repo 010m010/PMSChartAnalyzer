@@ -6,15 +6,22 @@ import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
-from PyQt6.QtGui import QPalette
+from PyQt6.QtGui import QPalette, QGuiApplication
 
 # Prefer Windows-installed Meiryo to avoid missing font warnings; fall back to common JP fonts.
 rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 
 matplotlib.use("Agg")
 
-ThemeMode = str  # "system", "light", "dark"
-
+def _system_prefers_dark() -> bool:
+    try:
+        scheme = QGuiApplication.styleHints().colorScheme()  # type: ignore[attr-defined]
+        return getattr(QPalette.ColorScheme, "Dark", None) == scheme
+    except Exception:
+        palette = QGuiApplication.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        return window_color.lightness() < 128
+    return False
 
 class StackedDensityChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -30,6 +37,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
             return True
         if self.theme_mode == "light":
             return False
+        if QGuiApplication.instance():
+            return _system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
@@ -97,6 +106,8 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
             return True
         if self.theme_mode == "light":
             return False
+        if QGuiApplication.instance():
+            return _system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
@@ -131,7 +142,24 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
 
         labels = list(values.keys())
         data = [values[label] for label in labels]
-        self.ax.boxplot(data, labels=labels, vert=True)
+        colors = {
+            "edge": "#66CCFF" if dark else "#004A80",
+            "fill": "#224466" if dark else "#B3D9FF",
+            "median": "#FFCC66" if dark else "#CC6600",
+        }
+        bp = self.ax.boxplot(
+            data,
+            labels=labels,
+            vert=True,
+            patch_artist=True,
+            boxprops=dict(facecolor=colors["fill"], edgecolor=colors["edge"]),
+            medianprops=dict(color=colors["median"]),
+            whiskerprops=dict(color=colors["edge"]),
+            capprops=dict(color=colors["edge"]),
+            flierprops=dict(markeredgecolor=colors["edge"], markerfacecolor=colors["fill"]),
+        )
+        for patch in bp["boxes"]:
+            patch.set_alpha(0.8)
         self.ax.set_title(f"{metric_name} の分布")
         self.ax.set_ylabel(metric_name)
         self._style_axes(dark=dark)
@@ -155,6 +183,8 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             return True
         if self.theme_mode == "light":
             return False
+        if QGuiApplication.instance():
+            return _system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128

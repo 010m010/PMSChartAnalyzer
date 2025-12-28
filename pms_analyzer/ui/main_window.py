@@ -352,8 +352,12 @@ class DifficultyTab(QWidget):
         saved_layout.addWidget(self.url_list, 1)
         saved_layout.addWidget(self.analyze_button)
         saved_layout.addWidget(self.delete_button)
-        saved_layout.addWidget(self.filter_button)
         layout.addLayout(saved_layout)
+
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(self.filter_button)
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
 
         layout.addWidget(self.loading_label)
         layout.addWidget(self.songdata_label)
