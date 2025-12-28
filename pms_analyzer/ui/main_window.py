@@ -382,15 +382,15 @@ class DifficultyTab(QWidget):
         self._start_download(url)
 
     def _analyze_table(self) -> None:
-        url = self._current_url
+        # 再解析: 入力欄が空なら選択中を使う
+        url = self.url_input.text().strip() or self.url_list.currentText() or self._current_url
         if not url:
-            QMessageBox.warning(self, "未選択", "先に難易度表を読み込んでください")
+            QMessageBox.warning(self, "未選択", "難易度表の URL を入力するか保存済みから選択してください")
             return
         if url in self._cached_results:
-            self._latest_analyses = self._cached_results[url]
-            self._render_table_and_chart()
+            self._start_download(url, add_to_saved=False, force_refresh=True)
             return
-        self._start_download(url)
+        self._start_download(url, add_to_saved=False, force_refresh=True)
 
     def _on_finished(self, table: DifficultyTable, analyses: List) -> None:
         self.analyze_button.setEnabled(True)
@@ -409,9 +409,8 @@ class DifficultyTab(QWidget):
         self.loading_label.setText("")
         QMessageBox.critical(self, "エラー", error_message)
 
-    def _start_download(self, url: str) -> None:
+    def _start_download(self, url: str, *, add_to_saved: bool = True, force_refresh: bool = False) -> None:
         name = Path(url).stem or "table"
-        self.table_label.setText(url)
         self.analyze_button.setEnabled(False)
         self.load_button.setEnabled(False)
         self.loading_label.setText("読み込み/解析中です。数分かかる場合があります...")
@@ -441,8 +440,9 @@ class DifficultyTab(QWidget):
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
-        add_saved_table(url)
-        self._refresh_saved_urls()
+        if add_to_saved:
+            add_saved_table(url)
+            self._refresh_saved_urls()
         self.refresh_songdata_label()
 
     def _refresh_saved_urls(self) -> None:

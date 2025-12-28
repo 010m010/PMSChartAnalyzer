@@ -108,6 +108,12 @@ class PMSParser:
             measure = int(line_match.group(1))
             channel = int(line_match.group(2))
             data = line_match.group(3)
+            if channel == 2:  # measure length (e.g., #00102:1.50)
+                try:
+                    measure_lengths[measure] = float(data)
+                except ValueError:
+                    pass
+                continue
             measures.setdefault(measure, []).append((channel, data))
 
         notes, total_time = self._convert_to_notes(measures, bpm, bpm_defs, measure_lengths)
