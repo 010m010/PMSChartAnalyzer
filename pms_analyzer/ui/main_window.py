@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QDragMoveEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -30,24 +30,25 @@ import requests
 
 from ..analysis import DensityResult, compute_density
 from ..difficulty_table import (
+    ChartAnalysis,
     DifficultyTable,
     analyze_table,
+    find_song_in_db,
     load_difficulty_table_from_content,
 )
 from ..pms_parser import PMSParser
 from ..storage import AnalysisRecord, add_saved_table, append_history, get_saved_tables, load_config, save_config
-from .charts import BoxPlotCanvas, StackedDensityChart
+from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 
 
 class AnalysisWorker(QThread):
     finished = pyqtSignal(object, object)
     failed = pyqtSignal(str)
 
-    def __init__(self, parser: PMSParser, path: Path, difficulty_label: str):
+    def __init__(self, parser: PMSParser, path: Path):
         super().__init__()
         self.parser = parser
         self.path = path
-        self.difficulty_label = difficulty_label
 
     def run(self) -> None:  # type: ignore[override]
         try:
@@ -62,11 +63,13 @@ class DifficultyTableWorker(QThread):
     finished = pyqtSignal(object, object)
     failed = pyqtSignal(str)
 
-    def __init__(self, parser: PMSParser, table_source: str, saved_name: str):
+    def __init__(self, parser: PMSParser, table_source: str, saved_name: str, *, songdata_db: Optional[Path], beatoraja_base: Optional[Path]):
         super().__init__()
         self.parser = parser
         self.table_source = table_source
         self.saved_name = saved_name
+        self.songdata_db = songdata_db
+        self.beatoraja_base = beatoraja_base
 
     def run(self) -> None:  # type: ignore[override]
         try:
@@ -74,7 +77,12 @@ class DifficultyTableWorker(QThread):
             response.raise_for_status()
             suffix = ".json" if self.table_source.lower().endswith(".json") else ".csv"
             table = load_difficulty_table_from_content(self.saved_name, response.text, suffix)
-            analyses = analyze_table(table, self.parser)
+            analyses = analyze_table(
+                table,
+                self.parser,
+                songdata_db=self.songdata_db,
+                beatoraja_base=self.beatoraja_base,
+            )
             self.finished.emit(table, analyses)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc())
@@ -89,7 +97,6 @@ class SingleAnalysisTab(QWidget):
         self.metrics_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
-        self.difficulty_input = QLineEdit()
         self.analyze_button = QPushButton("ファイルを開く")
         self._worker: Optional[AnalysisWorker] = None
         self._current_path: Optional[Path] = None
@@ -102,9 +109,6 @@ class SingleAnalysisTab(QWidget):
         info_layout = QHBoxLayout()
         info_layout.addWidget(QLabel("選択ファイル:"))
         info_layout.addWidget(self.file_label, 1)
-        info_layout.addWidget(QLabel("難易度ラベル:"))
-        self.difficulty_input.setPlaceholderText("例: 10 または EX")
-        info_layout.addWidget(self.difficulty_input)
         info_layout.addWidget(self.analyze_button)
         main_layout.addLayout(info_layout)
 
@@ -139,21 +143,23 @@ class SingleAnalysisTab(QWidget):
         self._current_path = path
         self.file_label.setText(str(path))
         self.status_label.setText("解析中...")
-        difficulty = self.difficulty_input.text().strip()
-        self._worker = AnalysisWorker(self.parser, path, difficulty)
+        self._worker = AnalysisWorker(self.parser, path)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
 
     def _on_finished(self, parse_result, density: DensityResult) -> None:
-        self.chart.plot(density.per_second_by_key)
+        title_text = parse_result.title
+        if parse_result.subtitle:
+            title_text = f"{parse_result.title} {parse_result.subtitle}"
+        self.chart.plot(density.per_second_by_key, title=title_text)
         self._update_metrics(density)
-        self.status_label.setText(f"解析完了: {parse_result.title}")
+        self.status_label.setText(f"解析完了: {title_text}")
         record = AnalysisRecord(
             file_path=str(parse_result.file_path),
-            title=parse_result.title,
+            title=title_text,
             artist=parse_result.artist,
-            difficulty=self.difficulty_input.text().strip() or None,
+            difficulty=None,
             metrics={
                 "max_density": density.max_density,
                 "average_density": density.average_density,
@@ -197,8 +203,22 @@ class DifficultyTab(QWidget):
         self.parser = parser
         self.table_label = QLabel("未読込")
         self.box_plot = BoxPlotCanvas(self)
-        self.table_widget = QTableWidget(0, 4)
-        self.table_widget.setHorizontalHeaderLabels(["難易度", "譜面数", "平均密度", "終端密度"])
+        self.difficulty_chart = DifficultyScatterChart(self)
+        self.table_widget = QTableWidget(0, 10)
+        self.table_widget.setHorizontalHeaderLabels(
+            [
+                "難易度表上の難易度値",
+                "曲名",
+                "総NOTES数",
+                "TOTAL値",
+                "平均密度",
+                "終端密度",
+                "二乗平均密度",
+                "md5ハッシュ",
+                "sha256ハッシュ",
+                "保存先パス",
+            ]
+        )
         self.load_button = QPushButton("難易度表を読み込む")
         self.analyze_button = QPushButton("一括解析")
         self.url_input = QLineEdit()
@@ -225,6 +245,7 @@ class DifficultyTab(QWidget):
         layout.addLayout(saved_layout)
 
         layout.addWidget(self.table_widget)
+        layout.addWidget(self.difficulty_chart)
         layout.addWidget(self.box_plot)
         self.setLayout(layout)
 
@@ -250,19 +271,31 @@ class DifficultyTab(QWidget):
     def _on_finished(self, table: DifficultyTable, analyses: List) -> None:
         self.analyze_button.setEnabled(True)
         self.load_button.setEnabled(True)
-        grouped: Dict[str, List[float]] = {}
+        density_by_diff: Dict[str, List[float]] = {}
+        scatter_points: List[tuple[str, float]] = []
         self.table_widget.setRowCount(len(analyses))
         for row, analysis in enumerate(analyses):
-            densities = [d.max_density for d in analysis.results]
-            avg_densities = [d.average_density for d in analysis.results]
-            terminal_densities = [d.terminal_density for d in analysis.results]
-            grouped[analysis.difficulty] = densities
-            self.table_widget.setItem(row, 0, QTableWidgetItem(analysis.difficulty))
-            self.table_widget.setItem(row, 1, QTableWidgetItem(str(len(analysis.results))))
-            self.table_widget.setItem(row, 2, QTableWidgetItem(f"{sum(avg_densities)/len(avg_densities):.2f}"))
-            self.table_widget.setItem(row, 3, QTableWidgetItem(f"{sum(terminal_densities)/len(terminal_densities):.2f}"))
+            entry = analysis.entry
+            density = analysis.density
+            density_by_diff.setdefault(analysis.difficulty, []).append(density.max_density)
+            scatter_points.append((analysis.difficulty, density.max_density))
 
-        self.box_plot.plot(grouped, "秒間密度(最大)")
+            title_text = entry.title
+            if entry.subtitle:
+                title_text = f"{entry.title} {entry.subtitle}"
+            self.table_widget.setItem(row, 0, QTableWidgetItem(analysis.difficulty))
+            self.table_widget.setItem(row, 1, QTableWidgetItem(title_text))
+            self.table_widget.setItem(row, 2, QTableWidgetItem(str(analysis.note_count)))
+            self.table_widget.setItem(row, 3, QTableWidgetItem(f"{analysis.total_value:.2f}" if analysis.total_value is not None else "-"))
+            self.table_widget.setItem(row, 4, QTableWidgetItem(f"{density.average_density:.2f}"))
+            self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.terminal_density:.2f}"))
+            self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.rms_density:.2f}"))
+            self.table_widget.setItem(row, 7, QTableWidgetItem(analysis.md5 or ""))
+            self.table_widget.setItem(row, 8, QTableWidgetItem(analysis.sha256 or ""))
+            self.table_widget.setItem(row, 9, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
+
+        self.box_plot.plot(density_by_diff, "秒間密度(最大)")
+        self.difficulty_chart.plot(scatter_points)
         self.table_label.setText(f"解析済み: {table.name}")
 
     def _on_failed(self, error_message: str) -> None:
@@ -276,7 +309,10 @@ class DifficultyTab(QWidget):
         self.analyze_button.setEnabled(False)
         self.load_button.setEnabled(False)
         self._current_url = url
-        self._worker = DifficultyTableWorker(self.parser, url, name)
+        config = load_config()
+        beatoraja_base = Path(config["beatoraja_path"]) if config.get("beatoraja_path") else None
+        songdata_db = beatoraja_base / "songdata.db" if beatoraja_base else None
+        self._worker = DifficultyTableWorker(self.parser, url, name, songdata_db=songdata_db, beatoraja_base=beatoraja_base)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
@@ -301,6 +337,8 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.parser = PMSParser()
         self.tabs = QTabWidget()
+        self.tabs.setAcceptDrops(True)
+        self.tabs.installEventFilter(self)
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
         self.single_tab = SingleAnalysisTab(self.parser, self)
         self.table_tab = DifficultyTab(self.parser, self)
@@ -344,7 +382,18 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:  # type: ignore[override]
-        urls = event.mimeData().urls()
+        self._handle_drop(event.mimeData().urls())
+
+    def eventFilter(self, source, event):  # type: ignore[override]
+        if source is self.tabs and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+            if event.mimeData().hasUrls():
+                event.acceptProposedAction()
+                if event.type() == QEvent.Drop:
+                    self._handle_drop(event.mimeData().urls())
+            return True
+        return super().eventFilter(source, event)
+
+    def _handle_drop(self, urls) -> None:
         if urls:
             path = Path(urls[0].toLocalFile())
             if path.suffix.lower() in {".pms", ".bms"}:

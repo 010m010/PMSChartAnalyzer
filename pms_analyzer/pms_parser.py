@@ -36,7 +36,9 @@ class ParseResult:
     notes: List[Note]
     total_time: float
     title: str
+    subtitle: str
     artist: str
+    total_value: float | None
     file_path: Path
 
 
@@ -55,6 +57,8 @@ class PMSParser:
         measure_lengths: Dict[int, float] = {}
         measures: Dict[int, List[Tuple[int, str]]] = {}
         title = path.stem
+        subtitle = ""
+        total_value: float | None = None
         artist = ""
 
         for raw_line in text.splitlines():
@@ -81,6 +85,13 @@ class PMSParser:
                     title = value
                 elif tag == "ARTIST" and value:
                     artist = value
+                elif tag == "SUBTITLE" and value:
+                    subtitle = value
+                elif tag == "TOTAL" and value:
+                    try:
+                        total_value = float(value)
+                    except ValueError:
+                        pass
                 elif tag == "MEASURE" and value:
                     parts = value.split()
                     if len(parts) == 2 and parts[0].isdigit():
@@ -105,7 +116,9 @@ class PMSParser:
             notes=notes,
             total_time=total_time,
             title=title,
+            subtitle=subtitle,
             artist=artist,
+            total_value=total_value,
             file_path=path,
         )
 

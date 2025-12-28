@@ -6,7 +6,9 @@ import io
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
+
+import sqlite3
 
 from .analysis import DensityResult, compute_density
 from .pms_parser import PMSParser
@@ -16,8 +18,13 @@ from .pms_parser import PMSParser
 class DifficultyEntry:
     difficulty: str
     title: str
-    chart_path: Path
+    subtitle: str | None
+    chart_path: Path | None
     artist: str | None = None
+    md5: str | None = None
+    sha256: str | None = None
+    total_value: float | None = None
+    note_count: int | None = None
 
 
 @dataclass
@@ -27,9 +34,17 @@ class DifficultyTable:
 
 
 @dataclass
-class TableAnalysis:
+class ChartAnalysis:
     difficulty: str
-    results: List[DensityResult]
+    density: DensityResult
+    entry: DifficultyEntry
+    resolved_path: Path | None
+    note_count: int
+    total_value: float | None
+    title: str
+    subtitle: str | None
+    md5: str | None
+    sha256: str | None
 
 
 SUPPORTED_SUFFIXES = {".csv", ".json"}
@@ -63,14 +78,51 @@ def analyze_table(
     parser: PMSParser,
     *,
     terminal_window: float = 5.0,
-) -> List[TableAnalysis]:
-    grouped: Dict[str, List[DensityResult]] = {}
+    songdata_db: Optional[Path] = None,
+    beatoraja_base: Optional[Path] = None,
+) -> List[ChartAnalysis]:
+    analyses: List[ChartAnalysis] = []
     for entry in table.entries:
-        parse_result = parser.parse(entry.chart_path)
-        density = compute_density(parse_result.notes, parse_result.total_time, terminal_window=terminal_window)
-        grouped.setdefault(entry.difficulty, []).append(density)
+        resolved_path = _resolve_entry_path(entry, songdata_db=songdata_db, beatoraja_base=beatoraja_base)
 
-    return [TableAnalysis(difficulty=diff, results=results) for diff, results in grouped.items()]
+        if resolved_path is None:
+            density = DensityResult([], [], 0.0, 0.0, 0.0, 0.0)
+            analyses.append(
+                ChartAnalysis(
+                    difficulty=entry.difficulty,
+                    density=density,
+                    entry=entry,
+                    resolved_path=None,
+                    note_count=entry.note_count or 0,
+                    total_value=entry.total_value,
+                    title=entry.title,
+                    subtitle=entry.subtitle,
+                    md5=entry.md5,
+                    sha256=entry.sha256,
+                )
+            )
+            continue
+
+        parse_result = parser.parse(resolved_path)
+        density = compute_density(parse_result.notes, parse_result.total_time, terminal_window=terminal_window)
+        entry.note_count = entry.note_count or len(parse_result.notes)
+        entry.total_value = entry.total_value or parse_result.total_value
+        analyses.append(
+            ChartAnalysis(
+                difficulty=entry.difficulty,
+                density=density,
+                entry=entry,
+                resolved_path=resolved_path,
+                note_count=len(parse_result.notes),
+                total_value=parse_result.total_value or entry.total_value,
+                title=parse_result.title,
+                subtitle=parse_result.subtitle,
+                md5=entry.md5,
+                sha256=entry.sha256,
+            )
+        )
+
+    return analyses
 
 
 def _read_csv(path: Path, *, base_dir: Optional[Path]) -> List[DifficultyEntry]:
@@ -78,13 +130,7 @@ def _read_csv(path: Path, *, base_dir: Optional[Path]) -> List[DifficultyEntry]:
     with path.open(encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            difficulty = (row.get("difficulty") or row.get("level") or "Unknown").strip()
-            title = (row.get("title") or row.get("name") or Path(row.get("pms_path", "")).stem).strip()
-            pms_raw = (row.get("pms_path") or row.get("chart") or "").strip()
-            artist = (row.get("artist") or "").strip() or None
-            resolved = _resolve_path(pms_raw, base_dir or path.parent)
-            if resolved:
-                entries.append(DifficultyEntry(difficulty=difficulty, title=title, chart_path=resolved, artist=artist))
+            entries.append(_entry_from_row(row, base_dir or path.parent))
     return entries
 
 
@@ -97,13 +143,8 @@ def _read_json(path: Path, *, base_dir: Optional[Path]) -> List[DifficultyEntry]
         items = data
 
     for item in items:
-        difficulty = str(item.get("difficulty") or item.get("level") or "Unknown")
-        title = item.get("title") or item.get("name") or Path(item.get("pms_path", "")).stem
-        artist = item.get("artist")
-        pms_raw = item.get("pms_path") or item.get("chart") or ""
-        resolved = _resolve_path(str(pms_raw), base_dir or path.parent)
-        if resolved:
-            entries.append(DifficultyEntry(difficulty=difficulty, title=str(title), chart_path=resolved, artist=artist))
+        row = {k: (v if v is not None else "") for k, v in item.items()}
+        entries.append(_entry_from_row(row, base_dir or path.parent))
     return entries
 
 
@@ -113,13 +154,7 @@ def _read_csv_stream(stream: io.StringIO, *, base_dir: Optional[Path]) -> List[D
     reader = csv.DictReader(stream)
     base = base_dir or Path(tempfile.gettempdir())
     for row in reader:
-        difficulty = (row.get("difficulty") or row.get("level") or "Unknown").strip()
-        title = (row.get("title") or row.get("name") or Path(row.get("pms_path", "")).stem).strip()
-        pms_raw = (row.get("pms_path") or row.get("chart") or "").strip()
-        artist = (row.get("artist") or "").strip() or None
-        resolved = _resolve_path(pms_raw, base)
-        if resolved:
-            entries.append(DifficultyEntry(difficulty=difficulty, title=title, chart_path=resolved, artist=artist))
+        entries.append(_entry_from_row(row, base))
     return entries
 
 
@@ -135,14 +170,48 @@ def _read_json_stream(stream: io.StringIO, *, base_dir: Optional[Path]) -> List[
         items = data
 
     for item in items:
-        difficulty = str(item.get("difficulty") or item.get("level") or "Unknown")
-        title = item.get("title") or item.get("name") or Path(item.get("pms_path", "")).stem
-        artist = item.get("artist")
-        pms_raw = item.get("pms_path") or item.get("chart") or ""
-        resolved = _resolve_path(str(pms_raw), base)
-        if resolved:
-            entries.append(DifficultyEntry(difficulty=difficulty, title=str(title), chart_path=resolved, artist=artist))
+        row = {k: (v if v is not None else "") for k, v in item.items()}
+        entries.append(_entry_from_row(row, base))
     return entries
+
+
+def _entry_from_row(row: Dict[str, object], base_dir: Path) -> DifficultyEntry:
+    def _get(key: str, fallback: str = "") -> str:
+        value = row.get(key) if isinstance(row, dict) else None
+        return str(value).strip() if value is not None else fallback
+
+    difficulty = _get("difficulty") or _get("level") or "Unknown"
+    title = _get("title") or _get("name") or Path(_get("pms_path")).stem
+    subtitle = _get("subtitle") or None
+    artist = _get("artist") or None
+    md5 = _get("md5") or None
+    sha256 = _get("sha256") or _get("hash_sha256") or None
+    total_raw = _get("total") or _get("total_value")
+    total_value = None
+    try:
+        total_value = float(total_raw) if total_raw else None
+    except ValueError:
+        total_value = None
+    note_raw = _get("notes") or _get("note_count")
+    note_count = None
+    try:
+        note_count = int(note_raw) if note_raw else None
+    except ValueError:
+        note_count = None
+    pms_raw = _get("pms_path") or _get("chart")
+    resolved = _resolve_path(pms_raw, base_dir) if pms_raw else None
+
+    return DifficultyEntry(
+        difficulty=difficulty,
+        title=title,
+        subtitle=subtitle,
+        chart_path=resolved,
+        artist=artist,
+        md5=md5,
+        sha256=sha256,
+        total_value=total_value,
+        note_count=note_count,
+    )
 
 
 def _resolve_path(value: str, base_dir: Path) -> Optional[Path]:
@@ -154,10 +223,96 @@ def _resolve_path(value: str, base_dir: Path) -> Optional[Path]:
     return candidate if candidate.exists() else None
 
 
+def _resolve_entry_path(entry: DifficultyEntry, *, songdata_db: Optional[Path], beatoraja_base: Optional[Path]) -> Optional[Path]:
+    if entry.chart_path and entry.chart_path.exists():
+        return entry.chart_path
+
+    if songdata_db:
+        found = find_song_in_db(songdata_db, md5=entry.md5, sha256=entry.sha256)
+        if found and found.get("path"):
+            raw_path = Path(str(found["path"]))
+            if not raw_path.is_absolute() and beatoraja_base:
+                raw_path = beatoraja_base / raw_path
+            entry.chart_path = raw_path if raw_path.exists() else None
+            entry.title = str(found.get("title") or entry.title)
+            entry.subtitle = str(found.get("subtitle") or entry.subtitle or "")
+            entry.artist = str(found.get("artist") or entry.artist or "")
+            entry.note_count = entry.note_count or (int(found.get("notes")) if found.get("notes") else None)
+            try:
+                entry.total_value = entry.total_value or (float(found.get("total")) if found.get("total") else None)
+            except (TypeError, ValueError):
+                pass
+            entry.md5 = entry.md5 or (found.get("md5") and str(found.get("md5")))
+            entry.sha256 = entry.sha256 or (found.get("sha256") and str(found.get("sha256")))
+            if entry.chart_path:
+                return entry.chart_path
+    return None
+
+
+def find_song_in_db(db_path: Path, *, md5: str | None = None, sha256: str | None = None) -> Optional[Dict[str, object]]:
+    if not db_path.exists():
+        return None
+    try:
+        con = sqlite3.connect(str(db_path))
+    except Exception:
+        return None
+
+    with con:
+        tables = [row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        hash_keys = {
+            "sha256": ["sha256", "sha256sum", "sha256_hash", "hash_sha256"],
+            "md5": ["md5", "md5sum", "hash_md5"],
+        }
+
+        for table in tables:
+            columns = {info[1].lower(): info[1] for info in con.execute(f"PRAGMA table_info('{table}')")}
+            hash_candidates: list[tuple[str, str]] = []
+            if sha256:
+                for key in hash_keys["sha256"]:
+                    if key in columns:
+                        hash_candidates.append((columns[key], sha256))
+                        break
+            if md5:
+                for key in hash_keys["md5"]:
+                    if key in columns:
+                        hash_candidates.append((columns[key], md5))
+                        break
+
+            for col, value in hash_candidates:
+                try:
+                    cursor = con.execute(f"SELECT * FROM '{table}' WHERE {col} = ?", (value,))
+                    row = cursor.fetchone()
+                except Exception:
+                    continue
+                if row is None:
+                    continue
+                desc = [d[0].lower() for d in cursor.description]
+                data = dict(zip(desc, row))
+                return {
+                    "path": _pick_first(data, ["path", "filepath", "file", "chartpath"]),
+                    "title": _pick_first(data, ["title", "name"]),
+                    "subtitle": data.get("subtitle"),
+                    "artist": data.get("artist"),
+                    "md5": data.get("md5") or data.get("md5sum") or data.get("hash_md5"),
+                    "sha256": data.get("sha256") or data.get("sha256sum") or data.get("sha256_hash") or data.get("hash_sha256"),
+                    "notes": _pick_first(data, ["notes", "notecount"]),
+                    "total": _pick_first(data, ["total", "totalvalue"]),
+                }
+    return None
+
+
+def _pick_first(data: Dict[str, object], keys: list[str]) -> Optional[object]:
+    for key in keys:
+        if key in data and data[key] not in (None, ""):
+            return data[key]
+    return None
+
+
 __all__ = [
     "DifficultyEntry",
     "DifficultyTable",
-    "TableAnalysis",
+    "ChartAnalysis",
     "load_difficulty_table",
     "analyze_table",
+    "find_song_in_db",
 ]

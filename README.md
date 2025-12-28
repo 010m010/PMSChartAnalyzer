@@ -8,6 +8,7 @@ PyQt を使った PMS 譜面分析アプリケーションです。9key の .pms
 - 難易度表（CSV / JSON）を読み込み、難易度別の密度分布を箱ひげ図で表示（URL を保存・再利用可能）
 - 解析履歴をローカル (`~/.pms_chart_analyzer`) に保存
 - メニューから beatoraja 本体パスを設定可能
+- Windows 向けにセットアップ用 `setup.bat` と起動用 `run.bat` を同梱
 
 ## 必要環境
 - Python 3.10 以上（Windows 10/11 向けを想定）
@@ -19,11 +20,13 @@ python -m venv .venv
 . .venv/Scripts/activate  # PowerShell の場合は .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 ```
+もしくは Windows では `setup.bat` をダブルクリックしてください。
 
 ## 使い方
 ```bash
 python main.py
 ```
+Windows では `run.bat` をダブルクリックするだけでも起動できます。
 1. 起動後、左側タブの「単曲分析」で .pms / .bms をウィンドウにドラッグ＆ドロップします。
 2. 解析が終わると、上部に積み上げ棒グラフ、下部に密度メトリクスが表示されます。
 3. 「難易度表」タブでは公開 URL を入力して難易度表を取得し、一括解析と箱ひげ図表示ができます（保存された URL から再選択も可能です）。

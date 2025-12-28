@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from math import ceil, sqrt
+from math import ceil
 from typing import Dict, Iterable, List, Sequence
 
 from .pms_parser import Note, ParseResult
@@ -43,7 +43,12 @@ def compute_density(
     terminal_notes = [note for note in notes if note.time >= terminal_start]
     window = min(terminal_window, total_time)
     terminal_density = len(terminal_notes) / window if window > 0 else 0.0
-    rms_density = sqrt(sum(val * val for val in per_second_total) / len(per_second_total)) if per_second_total else 0.0
+    # Mean of squared per-second densities (二乗平均密度)
+    rms_density = (
+        sum(val * val for val in per_second_total) / len(per_second_total)
+        if per_second_total
+        else 0.0
+    )
 
     return DensityResult(
         per_second_total=per_second_total,
