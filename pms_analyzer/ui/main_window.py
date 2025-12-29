@@ -170,9 +170,11 @@ class SingleAnalysisTab(QWidget):
         main_layout.addWidget(self.chart)
 
         info_layout = QHBoxLayout()
-        info_layout.addWidget(QLabel("選択ファイル:"))
-        info_layout.addWidget(self.file_label, 1)
         info_layout.addWidget(self.analyze_button)
+        info_layout.addWidget(QLabel("選択ファイル:"))
+        self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.file_label.setMinimumWidth(200)
+        info_layout.addWidget(self.file_label, 1)
         main_layout.addLayout(info_layout)
 
         info_group = QGroupBox("基本情報")
