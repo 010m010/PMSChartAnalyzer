@@ -637,6 +637,9 @@ class DifficultyTab(QWidget):
     def _render_table_and_chart(self) -> None:
         analyses = self._latest_analyses
         visible = [a for a in analyses if self._is_difficulty_visible(a.difficulty)]
+        sorting_state = self.table_widget.isSortingEnabled()
+        if sorting_state:
+            self.table_widget.setSortingEnabled(False)
         self.table_widget.setRowCount(len(visible))
         for row, analysis in enumerate(visible):
             entry = analysis.entry
@@ -668,6 +671,7 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 11, QTableWidgetItem(analysis.sha256 or ""))
             self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
+        self.table_widget.setSortingEnabled(sorting_state)
         self._render_chart()
         self._render_summary()
         self._sync_filter_options()

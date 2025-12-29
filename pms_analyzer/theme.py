@@ -36,7 +36,15 @@ def apply_app_palette(app: QApplication, mode: str) -> None:
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(200, 200, 200, 128))
         app.setPalette(palette)
     else:
-        app.setPalette(app.style().standardPalette())
+        palette = app.style().standardPalette()
+        # Ensure readable dark text on light backgrounds even after switching from dark mode
+        dark_text = QColor(20, 20, 20)
+        palette.setColor(QPalette.ColorRole.WindowText, dark_text)
+        palette.setColor(QPalette.ColorRole.Text, dark_text)
+        palette.setColor(QPalette.ColorRole.ButtonText, dark_text)
+        palette.setColor(QPalette.ColorRole.ToolTipText, dark_text)
+        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(80, 80, 80, 180))
+        app.setPalette(palette)
 
 
 __all__ = ["apply_app_palette", "system_prefers_dark"]
