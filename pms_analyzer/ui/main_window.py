@@ -191,11 +191,18 @@ class SingleAnalysisTab(QWidget):
             ("rate", "増加率 (/notes)"),
         ]
         for row, (key, label) in enumerate(info_fields):
-            info_grid.addWidget(QLabel(label), row, 0)
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            info_grid.addWidget(lbl, row, 0)
             value_label = QLabel("-")
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            value_label.setFixedWidth(240)
             self.info_labels[key] = value_label
             info_grid.addWidget(value_label, row, 1)
+        info_grid.setColumnMinimumWidth(0, 120)
+        info_grid.setColumnMinimumWidth(1, 240)
+        info_grid.setColumnStretch(0, 0)
+        info_grid.setColumnStretch(1, 0)
         info_group.setLayout(info_grid)
         main_layout.addWidget(info_group)
 
@@ -226,10 +233,17 @@ class SingleAnalysisTab(QWidget):
                 container.setLayout(info_layout)
                 grid.addWidget(container, row, 0)
             else:
-                grid.addWidget(QLabel(title), row, 0)
+                lbl = QLabel(title)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                grid.addWidget(lbl, row, 0)
             value_label = QLabel("-")
+            value_label.setFixedWidth(180)
             self.metrics_labels[key] = value_label
             grid.addWidget(value_label, row, 1)
+        grid.setColumnMinimumWidth(0, 170)
+        grid.setColumnMinimumWidth(1, 180)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 0)
         metrics_group.setLayout(grid)
         main_layout.addWidget(metrics_group)
 
