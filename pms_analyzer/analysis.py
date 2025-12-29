@@ -98,7 +98,7 @@ def compute_density(
 
     overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
     terminal_difficulty = (
-        (terminal_density - average_density) / (average_density + epsilon) if average_density > 0 else 0.0
+        (terminal_rms_density - rms_density) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
     )
     gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
 
