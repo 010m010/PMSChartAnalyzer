@@ -93,7 +93,7 @@ def build_widget_styles(dark: bool) -> str:
     popup = "#1F1F1F" if dark else "#FFFFFF"
     disabled = "#9BA3AE" if dark else "#7A8395"
     highlight = "#4A9DDE" if dark else "#2F7ACC"
-    table_border = "#8FA2B8" if dark else "#7D8CA3"
+    table_border = "#3E4653" if dark else "#7D8CA3"
     arrow_color = "%23E6E6E6" if dark else "%231D2835"
     arrow_icon = (
         f"data:image/svg+xml;utf8,"

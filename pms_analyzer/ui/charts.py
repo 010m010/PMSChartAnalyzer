@@ -238,15 +238,15 @@ class StackedDensityChart(FigureCanvasQTAgg):
 
         diffs = np.abs(np.diff(totals)) if len(totals) > 1 else np.array([0.0])
         normalized_variation = float(np.percentile(diffs, 75)) / (float(np.mean(totals)) + 1e-6)
-        growth = max(0, min(2, length // 60))
-        window = 3 + growth
+        growth = max(0, min(3, length // 60))
+        window = 4 + growth
 
         if normalized_variation < 0.15:
-            window += 1
+            window += 2
         if normalized_variation < 0.05:
             window += 1
 
-        window = min(window, 7)
+        window = min(window, 9)
 
         if window >= length:
             window = length if length % 2 == 1 else length - 1
@@ -322,7 +322,14 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.ax.set_ylabel(self.ax.get_ylabel(), color=text)
         self.ax.grid(True, linestyle=":", linewidth=0.7, color=grid)
 
-    def plot(self, values: Dict[str, List[float]], metric_name: str, *, y_limits: Optional[tuple[float, float]] = None) -> None:
+    def plot(
+        self,
+        values: Dict[str, List[float]],
+        metric_name: str,
+        *,
+        y_limits: Optional[tuple[float, float]] = None,
+        overlay_line: Optional[tuple[float, str, str]] = None,
+    ) -> None:
         self.ax.clear()
         dark = self._is_dark_mode()
         if not values:
@@ -354,6 +361,12 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self._style_axes(dark=dark)
         if y_limits:
             self.ax.set_ylim(*y_limits)
+        if overlay_line:
+            value, label, color = overlay_line
+            self.ax.axhline(value, color=color, linestyle="--", linewidth=1.6, label=label)
+            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper right")
+            for text in legend.get_texts():
+                text.set_color("#E6E6E6" if dark else "#1D2835")
         self.figure.tight_layout()
         self.draw()
 
@@ -408,6 +421,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         order: Optional[List[str]] = None,
         sort_key: Optional[Callable[[str], object]] = None,
         y_limits: Optional[tuple[float, float]] = None,
+        overlay_line: Optional[tuple[float, str, str]] = None,
     ) -> None:
         self.ax.clear()
         dark = self._is_dark_mode()
@@ -429,6 +443,12 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
         if y_limits:
             self.ax.set_ylim(*y_limits)
+        if overlay_line:
+            value, label, color = overlay_line
+            self.ax.axhline(value, color=color, linestyle="--", linewidth=1.6, label=label)
+            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper right")
+            for text in legend.get_texts():
+                text.set_color("#E6E6E6" if dark else "#1D2835")
         self.figure.tight_layout()
         self.draw()
 

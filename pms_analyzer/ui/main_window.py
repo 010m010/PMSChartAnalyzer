@@ -185,9 +185,13 @@ class SingleAnalysisTab(QWidget):
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
         self.analyze_button = QPushButton("ファイルを開く")
+        self._single_result_callback: Optional[callable[[str, DensityResult, int, Optional[float]], None]] = None
         self._worker: Optional[AnalysisWorker] = None
         self._current_path: Optional[Path] = None
         self._build_ui()
+
+    def set_single_result_handler(self, handler: callable[[str, DensityResult, int, Optional[float]], None]) -> None:
+        self._single_result_callback = handler
 
     def _build_ui(self) -> None:
         main_layout = QVBoxLayout()
@@ -385,6 +389,13 @@ class SingleAnalysisTab(QWidget):
             },
         )
         append_history(record)
+        if self._single_result_callback:
+            self._single_result_callback(
+                title_text,
+                density,
+                len(parse_result.notes),
+                parse_result.total_value,
+            )
 
     def _on_failed(self, error_message: str) -> None:
         self.status_label.setText("解析に失敗しました")
@@ -634,6 +645,9 @@ class DifficultyTab(QWidget):
         header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
         header.setSectionsClickable(True)
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        v_header = self.table_widget.verticalHeader()
+        v_header.setDefaultSectionSize(24)
+        v_header.setMinimumSectionSize(20)
         self.load_button = QPushButton("読み込む")
         self.analyze_button = QPushButton("更新")
         self.delete_button = QPushButton("削除")
@@ -665,7 +679,16 @@ class DifficultyTab(QWidget):
             ["LEVEL", "解析済み譜面数", "平均", "最小", "Q1", "中央値", "Q3", "最大"]
         )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        summary_v_header = self.summary_table.verticalHeader()
+        summary_v_header.setDefaultSectionSize(24)
+        summary_v_header.setMinimumSectionSize(20)
         self.songdata_label = QLabel("songdata.db: 未設定")
+        self.single_overlay_checkbox = QCheckBox("単曲分析の値を表示")
+        self.single_overlay_checkbox.setChecked(True)
+        self._single_overlay_title: str | None = None
+        self._single_overlay_density: DensityResult | None = None
+        self._single_overlay_note_count: int | None = None
+        self._single_overlay_total_value: float | None = None
         self._latest_analyses: List[ChartAnalysis] = []
         self._cached_results: Dict[str, List[ChartAnalysis]] = {}
         self._cached_symbols: Dict[str, str] = {}
@@ -680,6 +703,15 @@ class DifficultyTab(QWidget):
 
     def set_open_single_handler(self, handler: callable[[Path], None]) -> None:
         self._open_single_callback = handler
+
+    def update_single_overlay(
+        self, title: str, density: DensityResult, note_count: int, total_value: Optional[float]
+    ) -> None:
+        self._single_overlay_title = title
+        self._single_overlay_density = density
+        self._single_overlay_note_count = note_count
+        self._single_overlay_total_value = total_value
+        self._refresh_chart_only()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
@@ -723,6 +755,10 @@ class DifficultyTab(QWidget):
         chart_area_layout.addLayout(metric_layout)
         chart_area_layout.addWidget(self.difficulty_chart)
         chart_area_layout.addWidget(self.box_chart)
+        overlay_toggle_layout = QHBoxLayout()
+        overlay_toggle_layout.addStretch()
+        overlay_toggle_layout.addWidget(self.single_overlay_checkbox)
+        chart_area_layout.addLayout(overlay_toggle_layout)
         chart_area.setLayout(chart_area_layout)
 
         chart_layout.addWidget(chart_area)
@@ -772,6 +808,7 @@ class DifficultyTab(QWidget):
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
+        self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -1017,6 +1054,13 @@ class DifficultyTab(QWidget):
             for v in data[key]:
                 scatter_points.append((key, v))
                 all_values.append(v)
+        overlay_line = None
+        overlay_value = None
+        if self.single_overlay_checkbox.isChecked():
+            overlay_value = self._overlay_value_for_metric(metric)
+            if overlay_value is not None and self._single_overlay_title:
+                overlay_line = (overlay_value, f"{self._single_overlay_title} ({metric})", "#6AC59B")
+                all_values.append(overlay_value)
         y_limits = self._determine_y_limits(all_values)
 
         # Toggle charts
@@ -1024,12 +1068,17 @@ class DifficultyTab(QWidget):
             self.difficulty_chart.hide()
             self.box_chart.show()
             box_data = {k: data[k] for k in ordered_keys}
-            self.box_chart.plot(box_data, metric, y_limits=y_limits)
+            self.box_chart.plot(box_data, metric, y_limits=y_limits, overlay_line=overlay_line)
         else:
             self.box_chart.hide()
             self.difficulty_chart.show()
             self.difficulty_chart.plot(
-                scatter_points, y_label=metric, order=ordered_keys, sort_key=difficulty_sort_key, y_limits=y_limits
+                scatter_points,
+                y_label=metric,
+                order=ordered_keys,
+                sort_key=difficulty_sort_key,
+                y_limits=y_limits,
+                overlay_line=overlay_line,
             )
 
     def _metric_value(self, analysis: ChartAnalysis, metric: str) -> float | None:
@@ -1049,6 +1098,28 @@ class DifficultyTab(QWidget):
         if metric == "増加率":
             if analysis.total_value is not None and analysis.note_count:
                 return analysis.total_value / analysis.note_count
+            return None
+        return None
+
+    def _overlay_value_for_metric(self, metric: str) -> float | None:
+        if not self._single_overlay_density:
+            return None
+        density = self._single_overlay_density
+        if metric == "総NOTES":
+            return float(self._single_overlay_note_count or 0)
+        if metric == "最大瞬間密度":
+            return density.max_density
+        if metric == "平均密度":
+            return density.average_density
+        if metric == "RMS":
+            return density.rms_density
+        if metric == "終端密度":
+            return density.terminal_density
+        if metric == "終端RMS":
+            return density.terminal_rms_density
+        if metric == "増加率":
+            if self._single_overlay_total_value is not None and self._single_overlay_note_count:
+                return self._single_overlay_total_value / self._single_overlay_note_count
             return None
         return None
 
@@ -1077,7 +1148,11 @@ class DifficultyTab(QWidget):
         low = min(low, global_min)
         high = max(high, global_max)
         padding = (high - low) * 0.05 if high != low else 1.0
-        return (low - padding, high + padding)
+        lower = low - padding
+        upper = high + padding
+        if global_min >= 0 and lower < 0:
+            lower = max(0.0, global_min - padding * 0.5)
+        return (lower, upper)
 
     def _determine_y_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
         if self._manual_y_min is None and self._manual_y_max is None:
@@ -1087,6 +1162,8 @@ class DifficultyTab(QWidget):
         upper = self._manual_y_max if self._manual_y_max is not None else (
             auto_limits[1] if auto_limits else (lower + 1.0)
         )
+        if values and all(val >= 0 for val in values) and lower < 0:
+            lower = 0.0
         if lower == upper:
             upper = lower + 1.0
         return (lower, upper)
@@ -1267,6 +1344,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
         self.single_tab = SingleAnalysisTab(self.parser, self)
         self.table_tab = DifficultyTab(self.parser, self)
+        self.single_tab.set_single_result_handler(self.table_tab.update_single_overlay)
         self.table_tab.set_open_single_handler(self._open_single_from_table)
         self.tabs.addTab(self.single_tab, "単曲分析")
         self.tabs.addTab(self.table_tab, "難易度表")
