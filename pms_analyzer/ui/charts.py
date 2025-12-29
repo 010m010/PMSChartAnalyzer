@@ -159,6 +159,12 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.draw_idle()
 
     def _clear_selection(self) -> None:
+        if self._span_selector:
+            try:
+                self._span_selector.clear()
+            except Exception:
+                # Fallback for matplotlib versions where clear might not be available
+                pass
         if self._selection_artist:
             try:
                 self._selection_artist.remove()
