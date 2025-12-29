@@ -644,6 +644,8 @@ class DifficultyTab(QWidget):
         sorting_state = self.table_widget.isSortingEnabled()
         if sorting_state:
             self.table_widget.setSortingEnabled(False)
+            header = self.table_widget.horizontalHeader()
+            current_sort = (header.sortIndicatorSection(), header.sortIndicatorOrder())
         self.table_widget.setRowCount(len(visible))
         for row, analysis in enumerate(visible):
             entry = analysis.entry
@@ -657,7 +659,11 @@ class DifficultyTab(QWidget):
                 rate = f"{analysis.total_value / analysis.note_count:.2f}"
 
             self.table_widget.setItem(row, 0, QTableWidgetItem(difficulty_display))
-            self.table_widget.setItem(row, 1, QTableWidgetItem(title_text))
+            title_item = QTableWidgetItem(title_text)
+            if not analysis.resolved_path:
+                title_item.setForeground(QColor("red"))
+                title_item.setText(f"{title_text}（未解析）")
+            self.table_widget.setItem(row, 1, title_item)
             self.table_widget.setItem(row, 2, QTableWidgetItem(str(analysis.note_count or 0)))
             if analysis.total_value is None:
                 total_item = QTableWidgetItem("未定義")
@@ -676,6 +682,8 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
         self.table_widget.setSortingEnabled(sorting_state)
+        if sorting_state:
+            self.table_widget.sortItems(*current_sort)
         self._render_chart()
         self._render_summary()
         self._sync_filter_options()
