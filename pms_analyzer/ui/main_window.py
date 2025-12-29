@@ -164,6 +164,7 @@ class SingleAnalysisTab(QWidget):
         self._latest_single_density = None
         self.info_labels: Dict[str, QLabel] = {}
         self.metrics_labels: Dict[str, QLabel] = {}
+        self.range_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
         self.analyze_button = QPushButton("ファイルを開く")
@@ -263,11 +264,38 @@ class SingleAnalysisTab(QWidget):
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 0)
         metrics_group.setLayout(grid)
+
+        range_group = QGroupBox("選択範囲の統計")
+        range_grid = QGridLayout()
+        range_fields = [
+            ("range_span", "範囲 (秒)"),
+            ("range_notes", "NOTES数"),
+            ("range_gauge", "ゲージ増加量"),
+            ("range_avg", "平均密度"),
+            ("range_rms", "RMS"),
+        ]
+        for row, (key, title) in enumerate(range_fields):
+            lbl = QLabel(title)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            range_grid.addWidget(lbl, row, 0)
+            value_label = QLabel("-")
+            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            value_label.setFixedWidth(150)
+            self.range_labels[key] = value_label
+            range_grid.addWidget(value_label, row, 1)
+        range_grid.setHorizontalSpacing(6)
+        range_grid.setColumnMinimumWidth(0, 150)
+        range_grid.setColumnMinimumWidth(1, 150)
+        range_grid.setColumnStretch(0, 0)
+        range_grid.setColumnStretch(1, 0)
+        range_group.setLayout(range_grid)
+
         details_container = QWidget()
         details_layout = QVBoxLayout()
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.addWidget(info_group)
         details_layout.addWidget(metrics_group)
+        details_layout.addWidget(range_group)
         details_layout.addWidget(self.status_label)
         details_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
         details_container.setLayout(details_layout)
@@ -284,6 +312,8 @@ class SingleAnalysisTab(QWidget):
 
         self.analyze_button.clicked.connect(self._open_file_dialog)
         self.scale_button.clicked.connect(self._apply_single_scale)
+        self.chart.set_selection_callback(self._on_range_selected)
+        self._reset_range_metrics()
 
     def set_theme_mode(self, mode: str) -> None:
         self.chart.set_theme_mode(mode)
@@ -298,6 +328,8 @@ class SingleAnalysisTab(QWidget):
         self._current_path = path
         self.file_label.setText(str(path))
         self.status_label.setText("解析中...")
+        self._reset_range_metrics()
+        self.chart.clear_selection()
         self._worker = AnalysisWorker(self.parser, path)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
@@ -344,6 +376,7 @@ class SingleAnalysisTab(QWidget):
         self.metrics_labels["terminal_rms_density"].setText(f"{density.terminal_rms_density:.2f} note/s")
         self.metrics_labels["average_density"].setText(f"{density.average_density:.2f} note/s")
         self.metrics_labels["rms_density"].setText(f"{density.rms_density:.2f} note/s")
+        self._reset_range_metrics()
 
     def _apply_single_scale(self) -> None:
         text = self.scale_input.text().strip()
@@ -417,6 +450,78 @@ class SingleAnalysisTab(QWidget):
 
         _set_text("notes", str(len(parse_result.notes)))
         _set_text("rate", rate_text)
+
+    def _reset_range_metrics(self) -> None:
+        defaults = {
+            "range_span": "-",
+            "range_notes": "-",
+            "range_gauge": "-",
+            "range_avg": "-",
+            "range_rms": "-",
+        }
+        for key, default in defaults.items():
+            label = self.range_labels.get(key)
+            if label:
+                label.setText(default)
+
+    def _on_range_selected(self, start: float, end: float) -> None:
+        if not self._latest_single_parse or not self._latest_single_density:
+            self._reset_range_metrics()
+            return
+        density = self._latest_single_density
+        parse_result = self._latest_single_parse
+        if not density.per_second_total:
+            self._reset_range_metrics()
+            return
+        bin_size = density.duration / len(density.per_second_total) if len(density.per_second_total) else 1.0
+        total_span = bin_size * len(density.per_second_total)
+        start_clamped = max(min(start, end), 0.0)
+        end_clamped = min(max(start, end), total_span)
+        if end_clamped <= start_clamped:
+            self._reset_range_metrics()
+            if "range_span" in self.range_labels:
+                self.range_labels["range_span"].setText(f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+            return
+
+        first_note_time = parse_result.notes[0].time if parse_result.notes else 0.0
+        note_count = sum(
+            1 for note in parse_result.notes if start_clamped <= note.time - first_note_time < end_clamped
+        )
+        duration = end_clamped - start_clamped
+        avg_density = note_count / duration if duration > 0 else 0.0
+
+        gauge_increase = None
+        if parse_result.total_value is not None and parse_result.notes:
+            gauge_rate = parse_result.total_value / len(parse_result.notes)
+            gauge_increase = gauge_rate * note_count
+
+        rms = self._compute_range_rms(density.per_second_total, bin_size, start_clamped, end_clamped)
+
+        if "range_span" in self.range_labels:
+            self.range_labels["range_span"].setText(f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+        if "range_notes" in self.range_labels:
+            self.range_labels["range_notes"].setText(str(note_count))
+        if "range_gauge" in self.range_labels:
+            gauge_text = "未定義" if gauge_increase is None else f"{gauge_increase:.2f}"
+            self.range_labels["range_gauge"].setText(gauge_text)
+        if "range_avg" in self.range_labels:
+            self.range_labels["range_avg"].setText(f"{avg_density:.2f} note/s")
+        if "range_rms" in self.range_labels:
+            self.range_labels["range_rms"].setText(f"{rms:.2f} note/s")
+
+    def _compute_range_rms(self, per_second: List[int], bin_size: float, start: float, end: float) -> float:
+        if end <= start or not per_second or bin_size <= 0:
+            return 0.0
+        total_duration = end - start
+        weighted_sum = 0.0
+        for idx, val in enumerate(per_second):
+            bin_start = idx * bin_size
+            bin_end = bin_start + bin_size
+            overlap = max(0.0, min(bin_end, end) - max(bin_start, start))
+            if overlap <= 0:
+                continue
+            weighted_sum += (val * val) * overlap
+        return (weighted_sum / total_duration) ** 0.5 if total_duration > 0 else 0.0
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():

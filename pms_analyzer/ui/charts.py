@@ -6,6 +6,7 @@ import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
+from matplotlib.widgets import SpanSelector
 from PyQt6.QtGui import QPalette, QGuiApplication
 
 from ..theme import system_prefers_dark
@@ -25,6 +26,16 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
+        self._selection_callback: Optional[Callable[[float, float], None]] = None
+        self._selection_artist = None
+        self._span_selector = SpanSelector(
+            self.ax,
+            self._on_span_select,
+            "horizontal",
+            useblit=True,
+            props={"facecolor": "#66ccff", "alpha": 0.15},
+            interactive=True,
+        )
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -68,6 +79,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         y_max: float | None = None,
     ) -> None:
         self.ax.clear()
+        self._clear_selection()
         dark = self._is_dark_mode()
         self._style_axes(dark=dark)
         if not per_second_by_key:
@@ -89,9 +101,11 @@ class StackedDensityChart(FigureCanvasQTAgg):
             start_bin = int(start)
             end_bin = len(per_second_by_key)
             face = "#888888" if dark else "#CCCCCC"
-            self.ax.axvspan(start_bin, end_bin, color=face, alpha=0.2, zorder=0)
+            start_edge = max(start_bin - 0.5, -0.5)
+            end_edge = end_bin - 0.5
+            self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
             self.ax.text(
-                start_bin + 0.2,
+                max(start_edge + 0.2, 0.0),
                 self.ax.get_ylim()[1] * 0.9,
                 "終端範囲",
                 color="black" if not dark else "white",
@@ -108,6 +122,39 @@ class StackedDensityChart(FigureCanvasQTAgg):
         cmap = cm.get_cmap("plasma", 10)
         r, g, b, _ = cmap(bucket)
         return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
+
+    def set_selection_callback(self, callback: Optional[Callable[[float, float], None]]) -> None:
+        self._selection_callback = callback
+
+    def clear_selection(self) -> None:
+        self._clear_selection()
+
+    def _on_span_select(self, x_min: float, x_max: float) -> None:
+        if x_min is None or x_max is None:
+            return
+        start, end = sorted([x_min, x_max])
+        self._draw_selection_region(start, end)
+        if self._selection_callback:
+            self._selection_callback(start, end)
+
+    def _draw_selection_region(self, start: float, end: float) -> None:
+        if self._selection_artist:
+            try:
+                self._selection_artist.remove()
+            except ValueError:
+                pass
+        face = "#66CCFF" if not self._is_dark_mode() else "#2E8BC0"
+        self._selection_artist = self.ax.axvspan(start, end, color=face, alpha=0.2, zorder=0)
+        self.draw_idle()
+
+    def _clear_selection(self) -> None:
+        if self._selection_artist:
+            try:
+                self._selection_artist.remove()
+            except ValueError:
+                pass
+            self._selection_artist = None
+        self.draw_idle()
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
