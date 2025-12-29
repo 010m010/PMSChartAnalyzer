@@ -509,14 +509,19 @@ class SingleAnalysisTab(QWidget):
         if not density.per_second_total:
             self._reset_range_metrics()
             return
-        bin_size = density.duration / len(density.per_second_total) if len(density.per_second_total) else 1.0
-        total_span = bin_size * len(density.per_second_total)
+        total_bins = len(density.per_second_total)
+        bin_size = density.duration / total_bins if total_bins else 1.0
         start_clamped = max(min(start, end), 0.0)
-        end_clamped = min(max(start, end), total_span)
+        end_clamped = min(max(start, end), float(total_bins))
+        start_seconds_display = start_clamped * bin_size
+        end_seconds_display = end_clamped * bin_size
         if end_clamped <= start_clamped:
             self._reset_range_metrics()
             if "range_span" in self.range_labels:
-                self._set_label_text(self.range_labels["range_span"], f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+                self._set_label_text(
+                    self.range_labels["range_span"],
+                    f"{int(round(start_seconds_display))}～{int(round(end_seconds_display))} 秒",
+                )
             return
 
         first_note_time = parse_result.notes[0].time if parse_result.notes else 0.0
@@ -548,7 +553,7 @@ class SingleAnalysisTab(QWidget):
         if "range_span" in self.range_labels:
             self._set_label_text(
                 self.range_labels["range_span"],
-                f"{stats.start_seconds:.2f}～{stats.end_seconds:.2f} 秒",
+                f"{int(round(stats.start_seconds))}～{int(round(stats.end_seconds))} 秒",
             )
         if "range_notes" in self.range_labels:
             self._set_label_text(self.range_labels["range_notes"], str(stats.note_count))
