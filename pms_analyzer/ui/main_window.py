@@ -519,7 +519,6 @@ class DifficultyTab(QWidget):
 
     def _on_select_saved(self, value: str) -> None:
         if value:
-            self.url_input.setText(value)
             if value in self._cached_results:
                 self._latest_analyses = self._cached_results[value]
                 self._current_symbol = self._cached_symbols.get(value, "")
@@ -675,16 +674,16 @@ class DifficultyTab(QWidget):
         for analysis in self._latest_analyses:
             if not self._is_difficulty_visible(analysis.difficulty):
                 continue
-            if not analysis.resolved_path or not analysis.density.per_second_total:
-                continue
             key = self._format_difficulty(analysis.difficulty)
             rows.setdefault(key, {"values": [], "total": 0, "parsed": 0})
-            rows[key]["total"] += 1
-            if analysis.resolved_path:
-                rows[key]["parsed"] += 1
+            rows[key]["total"] += 1  # total charts listed in the difficulty table
+            if not analysis.resolved_path or not analysis.density.per_second_total:
+                continue
             val = self._metric_value(analysis, metric)
-            if val is not None:
-                rows[key]["values"].append(val)
+            if val is None:
+                continue
+            rows[key]["parsed"] += 1
+            rows[key]["values"].append(val)
 
         ordered = sorted(rows.keys(), key=difficulty_sort_key)
         if not ordered:
