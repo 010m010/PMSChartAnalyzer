@@ -174,8 +174,9 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if self._selection_artist:
             try:
                 self._selection_artist.remove()
-            except ValueError:
-                pass
+            except (ValueError, NotImplementedError):
+                # Some artist types cannot be removed; just hide them.
+                self._selection_artist.set_visible(False)
         face = "#4EB2FF" if not self._is_dark_mode() else "#2E8BC0"
         start_edge = start_bin - 0.5
         end_edge = end_bin - 0.5
@@ -194,21 +195,21 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if self._selection_artist:
             try:
                 self._selection_artist.remove()
-            except ValueError:
-                pass
+            except (ValueError, NotImplementedError):
+                self._selection_artist.set_visible(False)
             self._selection_artist = None
+        self._reset_bar_geometry()
         if self._bars:
             for patch, color in zip(self._bars, self._bar_colors):
                 patch.set_color(color)
-                patch.set_width(self._bar_width)
         self._restore_x_limits()
         self.draw_idle()
 
     def _apply_bar_highlight(self, start_bin: int, end_bin: int) -> None:
         if not self._bars:
             return
+        self._reset_bar_geometry()
         for idx, patch in enumerate(self._bars):
-            patch.set_width(self._bar_width)
             if idx < len(self._bar_colors):
                 base_color = self._bar_colors[idx]
             else:
@@ -217,6 +218,13 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 patch.set_color("#3BA7FF")
             else:
                 patch.set_color(base_color)
+
+    def _reset_bar_geometry(self) -> None:
+        if not self._bars:
+            return
+        for idx, patch in enumerate(self._bars):
+            patch.set_width(self._bar_width)
+            patch.set_x(idx - self._bar_width / 2)
 
     def _smooth_density_wave(self, totals: list[int]) -> list[float]:
         if not totals:
