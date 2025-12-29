@@ -96,7 +96,7 @@ def compute_density(
     variance = sum((val - mean_per_second) ** 2 for val in per_second_total) / len(per_second_total)
     std_per_second = variance**0.5
 
-    overall_difficulty = std_per_second / (mean_per_second + epsilon) if mean_per_second > 0 else 0.0
+    overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
     terminal_difficulty = (
         (terminal_density - average_density) / (average_density + epsilon) if average_density > 0 else 0.0
     )
