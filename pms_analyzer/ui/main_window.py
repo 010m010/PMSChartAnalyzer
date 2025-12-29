@@ -46,6 +46,7 @@ from ..difficulty_table import (
     load_difficulty_table_from_content,
 )
 from ..pms_parser import PMSParser
+from ..theme import apply_app_palette
 from ..utils import difficulty_sort_key
 from ..storage import (
     AnalysisRecord,
@@ -560,7 +561,12 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 0, QTableWidgetItem(difficulty_display))
             self.table_widget.setItem(row, 1, QTableWidgetItem(title_text))
             self.table_widget.setItem(row, 2, QTableWidgetItem(str(analysis.note_count or 0)))
-            self.table_widget.setItem(row, 3, QTableWidgetItem(f"{analysis.total_value:.2f}" if analysis.total_value is not None else "-"))
+            if analysis.total_value is None:
+                total_item = QTableWidgetItem("未定義")
+                total_item.setForeground(QColor("red"))
+            else:
+                total_item = QTableWidgetItem(f"{analysis.total_value:.2f}")
+            self.table_widget.setItem(row, 3, total_item)
             self.table_widget.setItem(row, 4, QTableWidgetItem(rate))
             self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.average_density:.2f}"))
             self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.terminal_density:.2f}"))
@@ -820,6 +826,9 @@ class MainWindow(QMainWindow):
 
     def _apply_theme_mode(self, mode: str, *, save: bool = True) -> None:
         self.theme_mode = mode
+        app = QApplication.instance()
+        if app:
+            apply_app_palette(app, mode)
         self.single_tab.set_theme_mode(mode)
         self.table_tab.set_theme_mode(mode)
         if save:

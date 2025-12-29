@@ -15,6 +15,8 @@ rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 
 matplotlib.use("Agg")
 
+ThemeMode = str  # "system", "light", "dark"
+
 class StackedDensityChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
         self.figure = Figure(figsize=(8, 3))
