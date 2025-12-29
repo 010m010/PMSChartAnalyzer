@@ -26,6 +26,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
+        self._bars = None
+        self._bar_colors: list[str] = []
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
         self._span_selector = SpanSelector(
@@ -85,11 +87,13 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if not per_second_by_key:
             self.draw()
             return
+        self._bar_colors = []
 
         totals = [sum(row) for row in per_second_by_key]
         x = list(range(len(per_second_by_key)))
         colors = [self._color_for_density(val) for val in totals]
-        self.ax.bar(x, totals, color=colors, width=0.9)
+        self._bar_colors = colors
+        self._bars = self.ax.bar(x, totals, color=colors, width=0.9)
         grid = "#444" if dark else "#ccc"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
         if title:
@@ -132,19 +136,26 @@ class StackedDensityChart(FigureCanvasQTAgg):
     def _on_span_select(self, x_min: float, x_max: float) -> None:
         if x_min is None or x_max is None:
             return
-        start, end = sorted([x_min, x_max])
-        self._draw_selection_region(start, end)
+        start_raw, end_raw = sorted([x_min, x_max])
+        start_bin = max(int(start_raw // 1), 0)
+        end_bin = max(start_bin + 1, int((-(-end_raw // 1))))  # ceil for ints
+        if self._bars:
+            end_bin = min(end_bin, len(self._bars))
+        self._draw_selection_region(start_bin, end_bin)
         if self._selection_callback:
-            self._selection_callback(start, end)
+            self._selection_callback(float(start_bin), float(end_bin))
 
-    def _draw_selection_region(self, start: float, end: float) -> None:
+    def _draw_selection_region(self, start_bin: int, end_bin: int) -> None:
         if self._selection_artist:
             try:
                 self._selection_artist.remove()
             except ValueError:
                 pass
         face = "#66CCFF" if not self._is_dark_mode() else "#2E8BC0"
-        self._selection_artist = self.ax.axvspan(start, end, color=face, alpha=0.2, zorder=0)
+        start_edge = start_bin - 0.5
+        end_edge = end_bin - 0.5
+        self._selection_artist = self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
+        self._apply_bar_highlight(start_bin, end_bin)
         self.draw_idle()
 
     def _clear_selection(self) -> None:
@@ -154,7 +165,23 @@ class StackedDensityChart(FigureCanvasQTAgg):
             except ValueError:
                 pass
             self._selection_artist = None
+        if self._bars:
+            for patch, color in zip(self._bars, self._bar_colors):
+                patch.set_color(color)
         self.draw_idle()
+
+    def _apply_bar_highlight(self, start_bin: int, end_bin: int) -> None:
+        if not self._bars:
+            return
+        for idx, patch in enumerate(self._bars):
+            if idx < len(self._bar_colors):
+                base_color = self._bar_colors[idx]
+            else:
+                base_color = patch.get_facecolor()
+            if start_bin <= idx < end_bin:
+                patch.set_color("#3BA7FF")
+            else:
+                patch.set_color(base_color)
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
