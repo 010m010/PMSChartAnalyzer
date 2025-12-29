@@ -114,18 +114,18 @@ class StackedDensityChart(FigureCanvasQTAgg):
             start = max(total_time - terminal_window, 0)
             start_bin = int(start)
             end_bin = len(per_second_by_key)
-            face = "#3A3A3A" if dark else "#DCE5F0"
-            label_color = "#e6e6e6" if dark else "#0F3D73"
+            face = "#8A6F1F" if dark else "#E8C96A"
+            label_color = "#F7E5A2" if dark else "#473000"
             start_edge = max(start_bin - 0.5, -0.5)
             end_edge = end_bin - 0.5
-            self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
+            self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.3, zorder=0)
             self.ax.text(
                 max(start_edge + 0.2, 0.0),
                 self.ax.get_ylim()[1] * 0.9,
                 "終端範囲",
                 color=label_color,
                 fontsize=9,
-                bbox=dict(facecolor=face, alpha=0.35, edgecolor="none", boxstyle="round,pad=0.2"),
+                bbox=dict(facecolor=face, alpha=0.45, edgecolor="none", boxstyle="round,pad=0.2"),
             )
         smoothed = self._smooth_density_wave(totals)
         if show_smoothed_line and smoothed:
@@ -363,8 +363,8 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
             self.ax.set_ylim(*y_limits)
         if overlay_line:
             value, label, color = overlay_line
-            self.ax.axhline(value, color=color, linestyle="--", linewidth=1.6, label=label)
-            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper right")
+            self.ax.axhline(value, color=color, linestyle="-", linewidth=1.1, label=label)
+            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper left")
             for text in legend.get_texts():
                 text.set_color("#E6E6E6" if dark else "#1D2835")
         self.figure.tight_layout()
@@ -445,8 +445,8 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             self.ax.set_ylim(*y_limits)
         if overlay_line:
             value, label, color = overlay_line
-            self.ax.axhline(value, color=color, linestyle="--", linewidth=1.6, label=label)
-            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper right")
+            self.ax.axhline(value, color=color, linestyle="-", linewidth=1.1, label=label)
+            legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="upper left")
             for text in legend.get_texts():
                 text.set_color("#E6E6E6" if dark else "#1D2835")
         self.figure.tight_layout()
