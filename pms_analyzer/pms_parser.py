@@ -40,7 +40,14 @@ class ParseResult:
     total_time: float
     title: str
     subtitle: str
+    genre: str
     artist: str
+    subartist: str
+    rank: int | None
+    level: str
+    start_bpm: float
+    min_bpm: float
+    max_bpm: float
     total_value: float | None
     file_path: Path
 
@@ -61,8 +68,12 @@ class PMSParser:
         measures: Dict[int, List[Tuple[int, str]]] = {}
         title = path.stem
         subtitle = ""
+        genre = ""
         total_value: float | None = None
         artist = ""
+        subartist = ""
+        rank: int | None = None
+        level = ""
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -95,6 +106,17 @@ class PMSParser:
                         total_value = float(value)
                     except ValueError:
                         pass
+                elif tag == "GENRE" and value:
+                    genre = value
+                elif tag == "SUBARTIST" and value:
+                    subartist = value
+                elif tag == "RANK" and value:
+                    try:
+                        rank = int(value)
+                    except ValueError:
+                        rank = None
+                elif tag in {"LEVEL", "PLAYLEVEL"} and value:
+                    level = value
                 elif tag == "MEASURE" and value:
                     parts = value.split()
                     if len(parts) == 2 and parts[0].isdigit():
@@ -119,14 +141,22 @@ class PMSParser:
                 continue
             measures.setdefault(measure, []).append((channel, data))
 
-        notes, total_time = self._convert_to_notes(measures, bpm, bpm_defs, measure_lengths)
+        notes, total_time, bpm_stats = self._convert_to_notes(measures, bpm, bpm_defs, measure_lengths)
+        start_bpm, min_bpm, max_bpm = bpm_stats
 
         return ParseResult(
             notes=notes,
             total_time=total_time,
             title=title,
             subtitle=subtitle,
+            genre=genre,
             artist=artist,
+            subartist=subartist,
+            rank=rank,
+            level=level,
+            start_bpm=start_bpm,
+            min_bpm=min_bpm,
+            max_bpm=max_bpm,
             total_value=total_value,
             file_path=path,
         )
@@ -146,11 +176,13 @@ class PMSParser:
         base_bpm: float,
         bpm_defs: Dict[str, float],
         measure_lengths: Dict[int, float],
-    ) -> tuple[List[Note], float]:
+    ) -> tuple[List[Note], float, tuple[float, float, float]]:
         current_time = 0.0
         current_bpm = base_bpm
         notes: List[Note] = []
         previous_measure = -1
+        min_bpm = base_bpm
+        max_bpm = base_bpm
 
         for measure in sorted(measures.keys()):
             # Skip missing measures while keeping BPM
@@ -170,6 +202,8 @@ class PMSParser:
 
                 if kind == "bpm":
                     current_bpm = value  # type: ignore[assignment]
+                    min_bpm = min(min_bpm, current_bpm)
+                    max_bpm = max(max_bpm, current_bpm)
                 elif kind == "note":
                     notes.append(Note(time=current_time, key_index=value))
 
@@ -177,7 +211,7 @@ class PMSParser:
             previous_measure = measure
 
         notes.sort(key=lambda n: n.time)
-        return notes, current_time
+        return notes, current_time, (base_bpm, min_bpm, max_bpm)
 
     def _expand_measure_events(
         self, measure_data: Iterable[Tuple[int, str]], bpm_defs: Dict[str, float]

@@ -156,6 +156,7 @@ class SingleAnalysisTab(QWidget):
         self.parser = parser
         self.setAcceptDrops(True)
         self.chart = StackedDensityChart(self)
+        self.info_labels: Dict[str, QLabel] = {}
         self.metrics_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
@@ -173,6 +174,30 @@ class SingleAnalysisTab(QWidget):
         info_layout.addWidget(self.file_label, 1)
         info_layout.addWidget(self.analyze_button)
         main_layout.addLayout(info_layout)
+
+        info_group = QGroupBox("基本情報")
+        info_grid = QGridLayout()
+        info_fields = [
+            ("title", "TITLE"),
+            ("subtitle", "SUBTITLE"),
+            ("genre", "GENRE"),
+            ("artist", "ARTIST"),
+            ("subartist", "SUBARTIST"),
+            ("bpm", "BPM"),
+            ("rank", "RANK"),
+            ("level", "LEVEL"),
+            ("total", "TOTAL"),
+            ("notes", "NOTES数"),
+            ("rate", "増加率 (/notes)"),
+        ]
+        for row, (key, label) in enumerate(info_fields):
+            info_grid.addWidget(QLabel(label), row, 0)
+            value_label = QLabel("-")
+            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.info_labels[key] = value_label
+            info_grid.addWidget(value_label, row, 1)
+        info_group.setLayout(info_grid)
+        main_layout.addWidget(info_group)
 
         metrics_group = QGroupBox("密度メトリクス")
         grid = QGridLayout()
@@ -237,6 +262,7 @@ class SingleAnalysisTab(QWidget):
         if parse_result.subtitle:
             title_text = f"{parse_result.title} {parse_result.subtitle}"
         self.chart.plot(density.per_second_by_key, title=title_text)
+        self._update_info(parse_result)
         self._update_metrics(density)
         self.status_label.setText(f"解析完了: {title_text}")
         record = AnalysisRecord(
@@ -264,6 +290,55 @@ class SingleAnalysisTab(QWidget):
         self.metrics_labels["terminal_rms_density"].setText(f"{density.terminal_rms_density:.2f} note/s")
         self.metrics_labels["average_density"].setText(f"{density.average_density:.2f} note/s")
         self.metrics_labels["rms_density"].setText(f"{density.rms_density:.2f} note/s")
+
+    def _update_info(self, parse_result) -> None:
+        def _set_text(key: str, text: str, *, color: str | None = None) -> None:
+            label = self.info_labels.get(key)
+            if not label:
+                return
+            label.setText(text)
+            if color:
+                label.setStyleSheet(f"color: {color};")
+            else:
+                label.setStyleSheet("")
+
+        _set_text("title", parse_result.title or "-")
+        _set_text("subtitle", parse_result.subtitle or "-")
+        _set_text("genre", parse_result.genre or "-")
+        _set_text("artist", parse_result.artist or "-")
+        _set_text("subartist", parse_result.subartist or "-")
+
+        if parse_result.min_bpm != parse_result.max_bpm:
+            bpm_text = f"{parse_result.start_bpm:.2f} ({parse_result.min_bpm:.2f}～{parse_result.max_bpm:.2f})"
+        else:
+            bpm_text = f"{parse_result.start_bpm:.2f}"
+        _set_text("bpm", bpm_text)
+
+        rank_labels = {
+            0: "Very Hard",
+            1: "Hard",
+            2: "Normal",
+            3: "Easy",
+            4: "Very Easy",
+        }
+        if parse_result.rank is not None and parse_result.rank in rank_labels:
+            rank_text = f"{parse_result.rank} ({rank_labels[parse_result.rank]})"
+        else:
+            rank_text = "未定義"
+        _set_text("rank", rank_text)
+
+        _set_text("level", parse_result.level or "-")
+
+        if parse_result.total_value is None:
+            _set_text("total", "未定義", color="red")
+            rate_text = "未定義"
+        else:
+            _set_text("total", f"{parse_result.total_value:.2f}")
+            note_count = len(parse_result.notes)
+            rate_text = f"{(parse_result.total_value / note_count):.4f}" if note_count else "未定義"
+
+        _set_text("notes", str(len(parse_result.notes)))
+        _set_text("rate", rate_text)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
