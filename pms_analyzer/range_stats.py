@@ -50,8 +50,14 @@ def calculate_range_selection_stats(
 
     start_bin_clamped = max(min(start_bin, end_bin), 0.0)
     end_bin_clamped = min(max(start_bin, end_bin), float(bin_count))
-    start_seconds = start_bin_clamped * resolved_bin_size
-    end_seconds = min(end_bin_clamped * resolved_bin_size, total_span)
+
+    start_bin_index = int(start_bin_clamped)
+    end_bin_index = int(end_bin_clamped)
+    if end_bin_index <= start_bin_index and end_bin_clamped > start_bin_clamped:
+        end_bin_index = min(start_bin_index + 1, bin_count)
+
+    start_seconds = start_bin_index * resolved_bin_size
+    end_seconds = min(end_bin_index * resolved_bin_size, total_span)
 
     first_note_time = notes[0].time if notes else 0.0
     note_count = 0
