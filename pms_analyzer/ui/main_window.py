@@ -423,8 +423,12 @@ class DifficultyTab(QWidget):
         self._current_symbol: str = ""
         self._current_url: Optional[str] = None
         self._worker: Optional[DifficultyTableWorker] = None
+        self._open_single_callback: Optional[callable[[Path], None]] = None
         self._build_ui()
         self._available_levels: list[str] = []
+
+    def set_open_single_handler(self, handler: callable[[Path], None]) -> None:
+        self._open_single_callback = handler
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
@@ -896,11 +900,12 @@ class DifficultyTab(QWidget):
         menu.addAction(action)
 
         def open_chart() -> None:
+            if not self._open_single_callback:
+                return
             if not path.exists():
                 QMessageBox.warning(self, "ファイルなし", f"譜面ファイルが見つかりません: {path}")
                 return
-            self.tabs.setCurrentWidget(self.single_tab)
-            self.single_tab.load_file(path)
+            self._open_single_callback(path)
 
         action.triggered.connect(open_chart)
         menu.exec(self.table_widget.viewport().mapToGlobal(pos))
@@ -936,6 +941,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabPosition(QTabWidget.TabPosition.West)
         self.single_tab = SingleAnalysisTab(self.parser, self)
         self.table_tab = DifficultyTab(self.parser, self)
+        self.table_tab.set_open_single_handler(self._open_single_from_table)
         self.tabs.addTab(self.single_tab, "単曲分析")
         self.tabs.addTab(self.table_tab, "難易度表")
         self.setCentralWidget(self.tabs)
@@ -1028,10 +1034,13 @@ class MainWindow(QMainWindow):
         if urls:
             path = Path(urls[0].toLocalFile())
             if path.suffix.lower() in {".pms", ".bms"}:
-                self.tabs.setCurrentWidget(self.single_tab)
-                self.single_tab.load_file(path)
+                self._open_single_from_table(path)
             else:
                 QMessageBox.warning(self, "不正な形式", ".pms または .bms ファイルを指定してください")
+
+    def _open_single_from_table(self, path: Path) -> None:
+        self.tabs.setCurrentWidget(self.single_tab)
+        self.single_tab.load_file(path)
 
     def _refresh_songdata_label(self) -> None:
         # Backward compatibility: call the public method used by MainWindow
