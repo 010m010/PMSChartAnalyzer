@@ -623,9 +623,12 @@ class DifficultyTab(QWidget):
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["散布図", "箱ひげ図"])
         self.chart_type_selector.setCurrentIndex(1)
-        self.scale_input = QLineEdit()
-        self.scale_input.setPlaceholderText("縦軸の最大値を入力")
+        self.scale_min_input = QLineEdit()
+        self.scale_min_input.setPlaceholderText("縦軸の最小値")
+        self.scale_max_input = QLineEdit()
+        self.scale_max_input.setPlaceholderText("縦軸の最大値")
         self.scale_button = QPushButton("更新")
+        self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(
@@ -677,13 +680,16 @@ class DifficultyTab(QWidget):
         chart_layout.setContentsMargins(0, 0, 0, 0)
         chart_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         metric_layout = QHBoxLayout()
+        metric_layout.addWidget(self.filter_button)
         metric_layout.addStretch()
         metric_layout.addWidget(QLabel("縦軸:"))
         metric_layout.addWidget(self.metric_selector)
         metric_layout.addWidget(QLabel("グラフ:"))
         metric_layout.addWidget(self.chart_type_selector)
         metric_layout.addWidget(QLabel("スケール調整:"))
-        metric_layout.addWidget(self.scale_input)
+        metric_layout.addWidget(self.scale_min_input)
+        metric_layout.addWidget(QLabel("～"))
+        metric_layout.addWidget(self.scale_max_input)
         metric_layout.addWidget(self.scale_button)
 
         chart_area = QWidget()
@@ -702,10 +708,6 @@ class DifficultyTab(QWidget):
         table_tab = QWidget()
         table_tab_layout = QVBoxLayout()
         table_tab_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(self.filter_button)
-        filter_layout.addStretch()
-        table_tab_layout.addLayout(filter_layout)
         table_tab_layout.addWidget(self.table_widget)
         table_tab.setLayout(table_tab_layout)
 
@@ -862,8 +864,10 @@ class DifficultyTab(QWidget):
 
     def _refresh_chart_only(self, *, clear_scale: bool = False) -> None:
         if clear_scale:
+            self._manual_y_min = None
             self._manual_y_max = None
-            self.scale_input.clear()
+            self.scale_min_input.clear()
+            self.scale_max_input.clear()
         if not self._latest_analyses:
             return
         self._render_chart()
@@ -975,10 +979,12 @@ class DifficultyTab(QWidget):
 
         ordered_keys = sorted(data.keys(), key=difficulty_sort_key)
         scatter_points = []
+        all_values: list[float] = []
         for key in ordered_keys:
             for v in data[key]:
                 scatter_points.append((key, v))
-        y_limits = (0, self._manual_y_max) if self._manual_y_max else None
+                all_values.append(v)
+        y_limits = self._determine_y_limits(all_values)
 
         # Toggle charts
         if self.chart_type_selector.currentText() == "箱ひげ図":
@@ -1040,6 +1046,18 @@ class DifficultyTab(QWidget):
         padding = (high - low) * 0.05 if high != low else 1.0
         return (low - padding, high + padding)
 
+    def _determine_y_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
+        if self._manual_y_min is None and self._manual_y_max is None:
+            return None
+        auto_limits = self._compute_y_limits(values) if values else None
+        lower = self._manual_y_min if self._manual_y_min is not None else (auto_limits[0] if auto_limits else 0.0)
+        upper = self._manual_y_max if self._manual_y_max is not None else (
+            auto_limits[1] if auto_limits else (lower + 1.0)
+        )
+        if lower == upper:
+            upper = lower + 1.0
+        return (lower, upper)
+
     def _render_summary(self) -> None:
         metric = self.summary_metric_selector.currentText()
         rows = {}
@@ -1077,34 +1095,24 @@ class DifficultyTab(QWidget):
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
     def _apply_manual_scale(self) -> None:
-        text = self.scale_input.text().strip()
-        if not text:
+        min_text = self.scale_min_input.text().strip()
+        max_text = self.scale_max_input.text().strip()
+        if not min_text and not max_text:
+            self._manual_y_min = None
             self._manual_y_max = None
             self._refresh_chart_only()
             return
         try:
-            value = float(text)
-            if value <= 0:
+            min_value = float(min_text) if min_text else None
+            max_value = float(max_text) if max_text else None
+            if min_value is not None and max_value is not None and min_value >= max_value:
                 raise ValueError
-            self._manual_y_max = value
+            self._manual_y_min = min_value
+            self._manual_y_max = max_value
         except ValueError:
-            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
+            QMessageBox.warning(self, "不正な値", "数値を正しく入力し、最小値は最大値より小さくしてください")
             return
         self._refresh_chart_only()
-
-    def _sync_filter_options(self) -> None:
-        difficulties = {self._format_difficulty(a.difficulty) for a in self._latest_analyses}
-        # Preserve existing checkbox states
-        for level in list(self._level_filters.keys()):
-            if level not in difficulties:
-                self._level_filters.pop(level)
-        for level in sorted(difficulties, key=difficulty_sort_key):
-            if level not in self._level_filters:
-                cb = QCheckBox(level)
-                cb.setChecked(True)
-                self._level_filters[level] = cb
-        # Remove filters that were deselected but no longer exist
-        self._filter_selection = {level for level, cb in self._level_filters.items() if cb.isChecked()}
 
     def _open_filter_dialog(self) -> None:
         self._sync_filter_options()
@@ -1201,7 +1209,7 @@ class DifficultyTab(QWidget):
 
     def _apply_filter_defaults(self) -> None:
         # Ensure all levels are visible after load/switch
-        if self._available_levels:
+        if self._available_levels and not self._filter_selection:
             self._filter_selection = set(self._available_levels)
 
 
