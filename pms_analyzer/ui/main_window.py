@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QLineEdit,
     QSpacerItem,
     QSizePolicy,
     QTabWidget,
@@ -204,11 +203,6 @@ class SingleAnalysisTab(QWidget):
         self.parser = parser
         self.setAcceptDrops(True)
         self.chart = StackedDensityChart(self)
-        self.scale_input = QLineEdit()
-        self.scale_input.setPlaceholderText("縦軸の最大値を入力")
-        self.scale_button = QPushButton("更新")
-        self.scale_reset_button = QPushButton("リセット")
-        self._manual_y_max_single: float | None = None
         self._latest_single_parse = None
         self._latest_single_density = None
         self._show_smoothed_line = True
@@ -217,8 +211,10 @@ class SingleAnalysisTab(QWidget):
         self.range_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
-        self.file_open_folder_link = QLabel("")
-        self.file_open_folder_link.setOpenExternalLinks(False)
+        self.file_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        self.file_label.setOpenExternalLinks(False)
         self.analyze_button = QPushButton("ファイルを開く")
         self._single_result_callback: Optional[callable[[str, DensityResult, int, Optional[float]], None]] = None
         self._worker: Optional[AnalysisWorker] = None
@@ -237,7 +233,6 @@ class SingleAnalysisTab(QWidget):
         self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.file_label.setMinimumWidth(200)
         file_layout.addWidget(self.file_label, 1)
-        file_layout.addWidget(self.file_open_folder_link)
         main_layout.addLayout(file_layout)
 
         chart_container = QWidget()
@@ -252,13 +247,6 @@ class SingleAnalysisTab(QWidget):
         line_toggle_layout.addWidget(self.line_toggle_checkbox)
         chart_layout.addLayout(line_toggle_layout)
 
-        scale_layout = QHBoxLayout()
-        scale_layout.addStretch()
-        scale_layout.addWidget(QLabel("縦軸の最大値:"))
-        scale_layout.addWidget(self.scale_input)
-        scale_layout.addWidget(self.scale_button)
-        scale_layout.addWidget(self.scale_reset_button)
-        chart_layout.addLayout(scale_layout)
         chart_container.setLayout(chart_layout)
 
         bottom_container = QWidget()
@@ -375,12 +363,10 @@ class SingleAnalysisTab(QWidget):
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
 
-        self._set_label_text(self.file_label, self.file_label.text())
+        self._update_file_label(None)
         self.analyze_button.clicked.connect(self._open_file_dialog)
-        self.file_open_folder_link.linkActivated.connect(self._open_current_folder)
-        self.scale_button.clicked.connect(self._apply_single_scale)
         self.line_toggle_checkbox.toggled.connect(self._on_toggle_smoothed_line)
-        self.scale_reset_button.clicked.connect(self._reset_single_scale)
+        self.file_label.linkActivated.connect(self._open_current_folder)
         self.chart.set_selection_callback(self._on_range_selected)
         self._reset_range_metrics()
 
@@ -410,8 +396,7 @@ class SingleAnalysisTab(QWidget):
 
     def load_file(self, path: Path) -> None:
         self._current_path = path
-        self._set_label_text(self.file_label, str(path))
-        self._update_folder_link(path)
+        self._update_file_label(path)
         self.status_label.setText("解析中...")
         self._reset_range_metrics()
         self.chart.clear_selection()
@@ -470,41 +455,6 @@ class SingleAnalysisTab(QWidget):
         self._apply_metric_label_colors(density)
         self._reset_range_metrics()
 
-    def _refresh_single_chart(self) -> None:
-        if self._latest_single_density and self._latest_single_parse:
-            parse_result = self._latest_single_parse
-            density = self._latest_single_density
-            self.chart.plot(
-                density.per_second_by_key,
-                title=parse_result.title,
-                total_time=density.duration,
-                terminal_window=density.terminal_window,
-                y_max=self._manual_y_max_single,
-                preserve_selection=True,
-            )
-
-    def _apply_single_scale(self) -> None:
-        text = self.scale_input.text().strip()
-        if not text:
-            self._manual_y_max_single = None
-            self._render_density_chart()
-            self._refresh_single_chart()
-            return
-        try:
-            value = float(text)
-            if value <= 0:
-                raise ValueError
-            self._manual_y_max_single = value
-        except ValueError:
-            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
-            return
-        self._render_density_chart()
-
-    def _reset_single_scale(self) -> None:
-        self.scale_input.clear()
-        self._manual_y_max_single = None
-        self._render_density_chart()
-
     def _on_toggle_smoothed_line(self, checked: bool) -> None:
         self._show_smoothed_line = checked
         self._render_density_chart()
@@ -522,22 +472,31 @@ class SingleAnalysisTab(QWidget):
             title=title_text,
             total_time=density.duration,
             terminal_window=density.terminal_window,
-            y_max=self._manual_y_max_single,
             show_smoothed_line=self._show_smoothed_line,
             preserve_selection=True,
         )
         return title_text
 
-    def _update_folder_link(self, path: Path) -> None:
-        if not path.exists():
-            self.file_open_folder_link.clear()
-            return
-        parent = path.parent
-        escaped = html.escape(str(parent))
-        self.file_open_folder_link.setText(f'<a href="{escaped}">フォルダを開く</a>')
-        self.file_open_folder_link.setToolTip(str(parent))
+    def _update_file_label(self, path: Optional[Path]) -> None:
+        if path and path.exists():
+            folder = path.parent
+            escaped_path = html.escape(str(path))
+            folder_url = QUrl.fromLocalFile(str(folder)).toString()
+            escaped_folder_url = html.escape(folder_url)
+            self.file_label.setText(f'<a href="{escaped_folder_url}">{escaped_path}</a>')
+            self.file_label.setToolTip(str(path))
+        elif path:
+            text = str(path)
+            self.file_label.setText(text)
+            self.file_label.setToolTip(text)
+        else:
+            self.file_label.setText("未選択")
+            self.file_label.setToolTip("未選択")
 
-    def _open_current_folder(self, _: str) -> None:
+    def _open_current_folder(self, url: str | None = None) -> None:
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+            return
         if not self._current_path:
             return
         folder = self._current_path.parent
@@ -701,7 +660,7 @@ class DifficultyTab(QWidget):
             [
                 "LEVEL",
                 "曲名",
-                "総NOTES数",
+                "NOTES数",
                 "TOTAL値",
                 "増加率",
                 "最大瞬間密度",
@@ -736,7 +695,7 @@ class DifficultyTab(QWidget):
         self.url_list.setEditable(False)
         self.metric_selector = QComboBox()
         self.metric_selector.addItems(
-            ["総NOTES", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS", "全体難度数", "終端難度数", "突風度数"]
+            ["NOTES数", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS", "全体難度数", "終端難度数", "突風度数"]
         )
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["箱ひげ図", "散布図"])
@@ -751,7 +710,7 @@ class DifficultyTab(QWidget):
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(
             [
-                "総NOTES",
+                "NOTES数",
                 "増加率",
                 "最大瞬間密度",
                 "平均密度",
@@ -1205,7 +1164,7 @@ class DifficultyTab(QWidget):
 
     def _metric_value(self, analysis: ChartAnalysis, metric: str) -> float | None:
         density = analysis.density
-        if metric == "総NOTES":
+        if metric == "NOTES数":
             return float(analysis.note_count or 0)
         if metric == "最大瞬間密度":
             return density.max_density
@@ -1238,7 +1197,7 @@ class DifficultyTab(QWidget):
         if not self._single_overlay_density:
             return None
         density = self._single_overlay_density
-        if metric == "総NOTES":
+        if metric == "NOTES数":
             return float(self._single_overlay_note_count or 0)
         if metric == "最大瞬間密度":
             return density.max_density
