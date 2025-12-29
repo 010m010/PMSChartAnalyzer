@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QLineEdit,
     QSpacerItem,
     QSizePolicy,
     QTabWidget,
@@ -318,7 +319,10 @@ class DifficultyTab(QWidget):
         self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "終端RMS", "RMS"])
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["散布図", "箱ひげ図"])
-        self.ignore_outliers_checkbox = QCheckBox("外れ値をスケールに含めない")
+        self.scale_input = QLineEdit()
+        self.scale_input.setPlaceholderText("縦軸の最大値を入力")
+        self.scale_button = QPushButton("更新")
+        self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(["総NOTES", "増加率", "平均密度", "終端密度", "終端RMS", "RMS"])
         self.filter_button = QPushButton("絞り込み")
@@ -381,7 +385,9 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.metric_selector)
         metric_layout.addWidget(QLabel("グラフ:"))
         metric_layout.addWidget(self.chart_type_selector)
-        metric_layout.addWidget(self.ignore_outliers_checkbox)
+        metric_layout.addWidget(QLabel("スケール調整:"))
+        metric_layout.addWidget(self.scale_input)
+        metric_layout.addWidget(self.scale_button)
 
         chart_area = QWidget()
         chart_area_layout = QVBoxLayout()
@@ -422,7 +428,7 @@ class DifficultyTab(QWidget):
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.chart_type_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
-        self.ignore_outliers_checkbox.stateChanged.connect(self._refresh_chart_only)
+        self.scale_button.clicked.connect(self._apply_manual_scale)
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self._refresh_saved_urls()
@@ -605,19 +611,13 @@ class DifficultyTab(QWidget):
         for key in ordered_keys:
             for v in data[key]:
                 scatter_points.append((key, v))
-        y_limits = None
-        if self.ignore_outliers_checkbox.isChecked():
-            all_values = [v for _, v in scatter_points]
-            y_limits = self._compute_y_limits(all_values)
+        y_limits = (0, self._manual_y_max) if self._manual_y_max else None
 
         # Toggle charts
         if self.chart_type_selector.currentText() == "箱ひげ図":
             self.difficulty_chart.hide()
             self.box_chart.show()
             box_data = {k: data[k] for k in ordered_keys}
-            if self.ignore_outliers_checkbox.isChecked():
-                flat = [val for vals in box_data.values() for val in vals]
-                y_limits = self._compute_y_limits(flat)
             self.box_chart.plot(box_data, metric, y_limits=y_limits)
         else:
             self.box_chart.hide()
@@ -704,6 +704,22 @@ class DifficultyTab(QWidget):
             for col, val in enumerate(labels, start=2):
                 text = "-" if val is None else f"{val:.2f}"
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
+
+    def _apply_manual_scale(self) -> None:
+        text = self.scale_input.text().strip()
+        if not text:
+            self._manual_y_max = None
+            self._refresh_chart_only()
+            return
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+            self._manual_y_max = value
+        except ValueError:
+            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
+            return
+        self._refresh_chart_only()
 
     def _sync_filter_options(self) -> None:
         difficulties = {self._format_difficulty(a.difficulty) for a in self._latest_analyses}
