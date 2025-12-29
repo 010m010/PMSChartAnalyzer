@@ -229,7 +229,6 @@ class SingleAnalysisTab(QWidget):
         info_grid.setColumnStretch(0, 0)
         info_grid.setColumnStretch(1, 0)
         info_group.setLayout(info_grid)
-        main_layout.addWidget(info_group)
 
         metrics_group = QGroupBox("密度メトリクス")
         grid = QGridLayout()
@@ -303,9 +302,9 @@ class SingleAnalysisTab(QWidget):
         range_group.setLayout(range_grid)
 
         details_layout = QHBoxLayout()
-        details_layout.addWidget(info_group, 3)
-        details_layout.addWidget(metrics_group, 2)
-        details_layout.addWidget(range_group, 2)
+        details_layout.addWidget(info_group, 2)
+        details_layout.addWidget(metrics_group, 1)
+        details_layout.addWidget(range_group, 1)
 
         main_layout.addWidget(chart_container, 3)
         main_layout.addLayout(details_layout)
