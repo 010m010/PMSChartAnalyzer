@@ -158,7 +158,7 @@ class AnalysisWorker(QThread):
 
 
 class DifficultyTableWorker(QThread):
-    finished = pyqtSignal(object, object)
+    finished = pyqtSignal(str, object, object)
     failed = pyqtSignal(str)
 
     def __init__(self, parser: PMSParser, table_source: str, saved_name: str, *, songdata_db: Optional[Path], beatoraja_base: Optional[Path]):
@@ -194,7 +194,7 @@ class DifficultyTableWorker(QThread):
                 songdata_db=self.songdata_db,
                 beatoraja_base=self.beatoraja_base,
             )
-            self.finished.emit(table, analyses)
+            self.finished.emit(self.table_source, table, analyses)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc())
 
@@ -889,21 +889,23 @@ class DifficultyTab(QWidget):
             return
         self._start_download(url, add_to_saved=False, force_refresh=True)
 
-    def _on_finished(self, table: DifficultyTable, analyses: List) -> None:
+    def _on_finished(self, url: str, table: DifficultyTable, analyses: List) -> None:
         self.analyze_button.setEnabled(True)
         self.load_button.setEnabled(True)
-        self._latest_analyses = analyses
-        current_url = self._current_url or ""
-        self._cached_results[current_url] = analyses
-        if self._current_url:
-            self._cached_symbols[self._current_url] = table.symbol or ""
-            if table.name:
-                update_saved_table_name(self._current_url, table.name)
-        self._current_symbol = table.symbol or ""
-        self._render_table_and_chart()
+        cache_key = url or ""
+        self._cached_results[cache_key] = analyses
+        self._cached_symbols[cache_key] = table.symbol or ""
+        if table.name:
+            update_saved_table_name(cache_key, table.name)
+
+        should_apply = self._current_url == cache_key or self._current_url is None
+        if should_apply:
+            self._current_url = cache_key
+            self._latest_analyses = analyses
+            self._current_symbol = table.symbol or ""
+            self._render_table_and_chart()
         self.loading_label.setText("")
-        if self._current_url:
-            self._refresh_saved_urls(keep_url=self._current_url)
+        self._refresh_saved_urls(keep_url=self._current_url or cache_key)
 
     def _on_failed(self, error_message: str) -> None:
         self.analyze_button.setEnabled(True)
