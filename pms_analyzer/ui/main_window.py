@@ -77,11 +77,11 @@ def _metric_color(metric_key: str, value: float | None) -> QColor | None:
             return QColor("#74a2e6")
         return None
     if metric_key == "overall_difficulty":
-        if value >= 1.0:
+        if value >= 2.0:
             return QColor("#cc2f2f")
-        if value >= 0.7:
+        if value >= 1.5:
             return QColor("#e67a73")
-        if value >= 0.3:
+        if value >= 1.2:
             return QColor("#f2b8b5")
         return None
     if metric_key == "gustiness":
