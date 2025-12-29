@@ -7,6 +7,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 from matplotlib.widgets import SpanSelector
+import numpy as np
 from PyQt6.QtGui import QPalette, QGuiApplication
 
 from ..theme import system_prefers_dark
@@ -115,6 +116,17 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 color="black" if not dark else "white",
                 fontsize=9,
             )
+        smoothed = self._smooth_density_wave(totals)
+        if smoothed:
+            line_color = "#007ACC" if not dark else "#7CC7FF"
+            self.ax.plot(
+                x,
+                smoothed,
+                color=line_color,
+                linewidth=2.0,
+                alpha=0.9,
+                zorder=3,
+            )
         if y_max:
             self.ax.set_ylim(top=y_max)
         self.figure.tight_layout()
@@ -188,6 +200,41 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 patch.set_color("#3BA7FF")
             else:
                 patch.set_color(base_color)
+
+    def _smooth_density_wave(self, totals: list[int]) -> list[float]:
+        if not totals:
+            return []
+        if len(totals) < 3:
+            return [float(val) for val in totals]
+        window_length = self._adaptive_window_length(len(totals))
+        polyorder = min(3, window_length - 1)
+        smoothed = self._savgol_smooth(np.array(totals, dtype=float), window_length, polyorder)
+        return smoothed.tolist()
+
+    def _adaptive_window_length(self, length: int) -> int:
+        if length < 5:
+            base = length if length % 2 == 1 else length - 1
+            return max(base, 3)
+        window = max(5, (length // 12) * 2 + 1)
+        window = min(window, 25)
+        if window >= length:
+            window = length if length % 2 == 1 else length - 1
+        if window < 3:
+            return 3
+        if window % 2 == 0:
+            window -= 1
+        return window
+
+    def _savgol_smooth(self, values: np.ndarray, window_length: int, polyorder: int) -> np.ndarray:
+        half_window = window_length // 2
+        padded = np.pad(values, (half_window, half_window), mode="edge")
+        x = np.arange(-half_window, half_window + 1, dtype=float)
+        smoothed = np.empty_like(values, dtype=float)
+        for idx in range(len(values)):
+            segment = padded[idx : idx + window_length]
+            coeffs = np.polyfit(x, segment, polyorder)
+            smoothed[idx] = np.polyval(coeffs, 0.0)
+        return smoothed
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
