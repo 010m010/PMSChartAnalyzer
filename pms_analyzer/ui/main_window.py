@@ -892,7 +892,7 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = cached
                 self._current_symbol = self._cached_symbols.get(urls[0], "")
                 self._render_table_and_chart()
-                self._reset_sorting()
+                self._reset_sorting_safe()
                 self._sync_filter_options()
                 self._apply_filter_defaults()
 
@@ -902,7 +902,7 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = self._cached_results[value]
                 self._current_symbol = self._cached_symbols.get(value, "")
                 self._render_table_and_chart()
-                self._reset_sorting()
+                self._reset_sorting_safe()
                 self._sync_filter_options()
                 self._apply_filter_defaults()
 
@@ -1018,6 +1018,26 @@ class DifficultyTab(QWidget):
             self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
         self._render_chart()
         self._render_summary()
+
+    def _reset_sorting_safe(self) -> None:
+        """Reset the sort indicator without raising if the helper is missing.
+
+        Some interactions (e.g., toggling UI elements mid-selection) could
+        trigger this logic before the table is fully constructed in earlier
+        builds. Guard the call so we gracefully keep the default sort instead
+        of crashing.
+        """
+        if hasattr(self, "_reset_sorting"):
+            reset_method = getattr(self, "_reset_sorting")
+            if callable(reset_method):
+                reset_method()
+                return
+        header = self.table_widget.horizontalHeader()
+        if header:
+            self.table_widget.setSortingEnabled(False)
+            header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+            self.table_widget.setSortingEnabled(True)
+            self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
 
     def _reset_sorting(self) -> None:
         header = self.table_widget.horizontalHeader()
