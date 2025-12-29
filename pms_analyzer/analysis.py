@@ -19,6 +19,9 @@ class DensityResult:
     rms_density: float
     duration: float
     terminal_window: float | None
+    overall_difficulty: float
+    terminal_difficulty: float
+    gustiness: float
 
 
 def compute_density(
@@ -29,10 +32,24 @@ def compute_density(
     terminal_window: float = 5.0,
     total_value: float | None = None,
 ) -> DensityResult:
+    epsilon = 1e-6
     if not notes:
         empty_bins: List[int] = []
         empty_by_key: List[List[int]] = []
-        return DensityResult(empty_bins, empty_by_key, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None)
+        return DensityResult(
+            empty_bins,
+            empty_by_key,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            0.0,
+            0.0,
+            0.0,
+        )
 
     # Trim leading/trailing silence to avoid skewing density
     start_time = notes[0].time
@@ -75,6 +92,16 @@ def compute_density(
         else 0.0
     )
 
+    mean_per_second = sum(per_second_total) / len(per_second_total)
+    variance = sum((val - mean_per_second) ** 2 for val in per_second_total) / len(per_second_total)
+    std_per_second = variance**0.5
+
+    overall_difficulty = std_per_second / (mean_per_second + epsilon) if mean_per_second > 0 else 0.0
+    terminal_difficulty = (
+        (terminal_density - average_density) / (average_density + epsilon) if average_density > 0 else 0.0
+    )
+    gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+
     return DensityResult(
         per_second_total=per_second_total,
         per_second_by_key=per_second_by_key,
@@ -85,6 +112,9 @@ def compute_density(
         rms_density=rms_density,
         duration=duration,
         terminal_window=terminal_window_used,
+        overall_difficulty=overall_difficulty,
+        terminal_difficulty=terminal_difficulty,
+        gustiness=gustiness,
     )
 
 
@@ -97,6 +127,9 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "terminal_density": 0.0,
             "terminal_rms_density": 0.0,
             "rms_density": 0.0,
+            "overall_difficulty": 0.0,
+            "terminal_difficulty": 0.0,
+            "gustiness": 0.0,
         }
 
     return {
@@ -105,6 +138,9 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
         "terminal_rms_density": sum(r.terminal_rms_density for r in totals) / len(totals),
         "rms_density": sum(r.rms_density for r in totals) / len(totals),
+        "overall_difficulty": sum(r.overall_difficulty for r in totals) / len(totals),
+        "terminal_difficulty": sum(r.terminal_difficulty for r in totals) / len(totals),
+        "gustiness": sum(r.gustiness for r in totals) / len(totals),
     }
 
 
