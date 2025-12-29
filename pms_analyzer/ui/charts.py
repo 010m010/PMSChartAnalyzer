@@ -58,7 +58,15 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.ax.set_ylabel("Notes", color=text)
         self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
 
-    def plot(self, per_second_by_key: List[List[int]], title: str | None = None) -> None:
+    def plot(
+        self,
+        per_second_by_key: List[List[int]],
+        title: str | None = None,
+        *,
+        total_time: float | None = None,
+        terminal_window: float | None = None,
+        y_max: float | None = None,
+    ) -> None:
         self.ax.clear()
         dark = self._is_dark_mode()
         self._style_axes(dark=dark)
@@ -76,6 +84,21 @@ class StackedDensityChart(FigureCanvasQTAgg):
             self.ax.set_title(title, color="white" if dark else "black")
         else:
             self.ax.set_title("秒間密度", color="white" if dark else "black")
+        if total_time and terminal_window:
+            start = max(total_time - terminal_window, 0)
+            start_bin = int(start)
+            end_bin = len(per_second_by_key)
+            face = "#888888" if dark else "#CCCCCC"
+            self.ax.axvspan(start_bin, end_bin, color=face, alpha=0.2, zorder=0)
+            self.ax.text(
+                start_bin + 0.2,
+                self.ax.get_ylim()[1] * 0.9,
+                "終端範囲",
+                color="black" if not dark else "white",
+                fontsize=9,
+            )
+        if y_max:
+            self.ax.set_ylim(top=y_max)
         self.figure.tight_layout()
         self.draw()
 

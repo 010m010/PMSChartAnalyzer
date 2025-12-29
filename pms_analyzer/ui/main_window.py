@@ -156,6 +156,12 @@ class SingleAnalysisTab(QWidget):
         self.parser = parser
         self.setAcceptDrops(True)
         self.chart = StackedDensityChart(self)
+        self.scale_input = QLineEdit()
+        self.scale_input.setPlaceholderText("縦軸の最大値を入力")
+        self.scale_button = QPushButton("更新")
+        self._manual_y_max_single: float | None = None
+        self._latest_single_parse = None
+        self._latest_single_density = None
         self.info_labels: Dict[str, QLabel] = {}
         self.metrics_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
@@ -175,6 +181,8 @@ class SingleAnalysisTab(QWidget):
         self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.file_label.setMinimumWidth(200)
         info_layout.addWidget(self.file_label, 1)
+        info_layout.addWidget(self.scale_input)
+        info_layout.addWidget(self.scale_button)
         main_layout.addLayout(info_layout)
 
         info_group = QGroupBox("基本情報")
@@ -254,6 +262,7 @@ class SingleAnalysisTab(QWidget):
         self.setLayout(main_layout)
 
         self.analyze_button.clicked.connect(self._open_file_dialog)
+        self.scale_button.clicked.connect(self._apply_single_scale)
 
     def set_theme_mode(self, mode: str) -> None:
         self.chart.set_theme_mode(mode)
@@ -274,10 +283,18 @@ class SingleAnalysisTab(QWidget):
         self._worker.start()
 
     def _on_finished(self, parse_result, density: DensityResult) -> None:
+        self._latest_single_parse = parse_result
+        self._latest_single_density = density
         title_text = parse_result.title
         if parse_result.subtitle:
             title_text = f"{parse_result.title} {parse_result.subtitle}"
-        self.chart.plot(density.per_second_by_key, title=title_text)
+        self.chart.plot(
+            density.per_second_by_key,
+            title=title_text,
+            total_time=parse_result.total_time,
+            terminal_window=5.0,
+            y_max=self._manual_y_max_single,
+        )
         self._update_info(parse_result)
         self._update_metrics(density)
         self.status_label.setText(f"解析完了: {title_text}")
@@ -306,6 +323,30 @@ class SingleAnalysisTab(QWidget):
         self.metrics_labels["terminal_rms_density"].setText(f"{density.terminal_rms_density:.2f} note/s")
         self.metrics_labels["average_density"].setText(f"{density.average_density:.2f} note/s")
         self.metrics_labels["rms_density"].setText(f"{density.rms_density:.2f} note/s")
+
+    def _apply_single_scale(self) -> None:
+        text = self.scale_input.text().strip()
+        if not text:
+            self._manual_y_max_single = None
+            return
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+            self._manual_y_max_single = value
+        except ValueError:
+            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
+            return
+        if self._latest_single_density and self._latest_single_parse:
+            parse_result = self._latest_single_parse
+            density = self._latest_single_density
+            self.chart.plot(
+                density.per_second_by_key,
+                title=parse_result.title,
+                total_time=parse_result.total_time,
+                terminal_window=5.0,
+                y_max=self._manual_y_max_single,
+            )
 
     def _update_info(self, parse_result) -> None:
         def _set_text(key: str, text: str, *, color: str | None = None) -> None:
