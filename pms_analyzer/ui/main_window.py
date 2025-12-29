@@ -291,8 +291,8 @@ class SingleAnalysisTab(QWidget):
         self.chart.plot(
             density.per_second_by_key,
             title=title_text,
-            total_time=parse_result.total_time,
-            terminal_window=5.0,
+            total_time=density.duration,
+            terminal_window=density.terminal_window,
             y_max=self._manual_y_max_single,
         )
         self._update_info(parse_result)
@@ -343,8 +343,8 @@ class SingleAnalysisTab(QWidget):
             self.chart.plot(
                 density.per_second_by_key,
                 title=parse_result.title,
-                total_time=parse_result.total_time,
-                terminal_window=5.0,
+                total_time=density.duration,
+                terminal_window=density.terminal_window,
                 y_max=self._manual_y_max_single,
             )
 

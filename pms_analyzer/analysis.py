@@ -17,6 +17,8 @@ class DensityResult:
     terminal_density: float
     terminal_rms_density: float
     rms_density: float
+    duration: float
+    terminal_window: float | None
 
 
 def compute_density(
@@ -27,40 +29,45 @@ def compute_density(
     terminal_window: float = 5.0,
     total_value: float | None = None,
 ) -> DensityResult:
-    if total_time <= 0 or not notes:
+    if not notes:
         empty_bins: List[int] = []
         empty_by_key: List[List[int]] = []
-        return DensityResult(empty_bins, empty_by_key, 0.0, 0.0, 0.0, 0.0, 0.0)
+        return DensityResult(empty_bins, empty_by_key, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None)
 
-    num_bins = max(1, ceil(total_time / bin_size))
+    # Trim leading/trailing silence to avoid skewing density
+    start_time = notes[0].time
+    end_time = notes[-1].time
+    duration = max(end_time - start_time, 1e-6)
+
+    num_bins = max(1, ceil(duration / bin_size))
     per_second_by_key: List[List[int]] = [[0 for _ in range(9)] for _ in range(num_bins)]
     for note in notes:
-        index = min(int(note.time // bin_size), num_bins - 1)
+        adjusted = max(note.time - start_time, 0.0)
+        index = min(int(adjusted // bin_size), num_bins - 1)
         per_second_by_key[index][note.key_index] += 1
 
     per_second_total = [sum(row) for row in per_second_by_key]
     max_density = max(per_second_total)
-    average_density = len(notes) / max(total_time, 1e-6)
-    gauge_rate = (total_value / len(notes)) if total_value and len(notes) > 0 else None
-    required_notes = None
-    if gauge_rate and gauge_rate > 0:
-        required_notes = ceil((85.0 - 2.0) / gauge_rate)
-    if required_notes is not None:
-        start_idx = max(len(notes) - required_notes, 0)
-        terminal_notes = notes[start_idx:]
-        terminal_start = notes[start_idx].time if terminal_notes else total_time
-        window = max(total_time - terminal_start, 0.0)
-    else:
-        terminal_start = max(total_time - terminal_window, 0)
-        terminal_notes = [note for note in notes if note.time >= terminal_start]
-        window = min(terminal_window, total_time)
-    terminal_density = len(terminal_notes) / window if window > 0 else 0.0
+    average_density = len(notes) / duration
 
-    start_bin = min(max(int(terminal_start // bin_size), 0), len(per_second_total))
-    terminal_bins = per_second_total[start_bin:] if start_bin < len(per_second_total) else []
-    terminal_rms_density = (
-        (sum(val * val for val in terminal_bins) / len(terminal_bins)) ** 0.5 if terminal_bins else 0.0
-    )
+    terminal_density = 0.0
+    terminal_rms_density = 0.0
+    terminal_window_used: float | None = None
+    if total_value and len(notes) > 0:
+        gauge_rate = total_value / len(notes)
+        if gauge_rate > 0:
+            required_notes = ceil((85.0 - 2.0) / gauge_rate)
+            start_idx = max(len(notes) - required_notes, 0)
+            terminal_notes = notes[start_idx:]
+            terminal_start = terminal_notes[0].time if terminal_notes else end_time
+            window = max(end_time - terminal_start, 0.0)
+            terminal_window_used = window
+            if window > 0:
+                terminal_density = len(terminal_notes) / window
+            start_bin = min(max(int(max(terminal_start - start_time, 0.0) // bin_size), 0), len(per_second_total))
+            terminal_bins = per_second_total[start_bin:] if start_bin < len(per_second_total) else []
+            if terminal_bins:
+                terminal_rms_density = (sum(val * val for val in terminal_bins) / len(terminal_bins)) ** 0.5
     # Root-mean-square of per-second densities
     rms_density = (
         (sum(val * val for val in per_second_total) / len(per_second_total)) ** 0.5
@@ -76,6 +83,8 @@ def compute_density(
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
         rms_density=rms_density,
+        duration=duration,
+        terminal_window=terminal_window_used,
     )
 
 

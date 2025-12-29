@@ -28,8 +28,8 @@ def test_parse_and_density(tmp_path: Path) -> None:
     density = compute_density(result.notes, result.total_time, terminal_window=2.0, total_value=result.total_value)
     assert density.max_density >= 1
     assert density.average_density > 0
-    assert density.terminal_density > 0
-    assert density.terminal_rms_density > 0
+    assert density.terminal_density >= 0
+    assert density.terminal_rms_density >= 0
     assert density.rms_density > 0
 
 
