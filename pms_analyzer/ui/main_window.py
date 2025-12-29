@@ -429,6 +429,11 @@ class SingleAnalysisTab(QWidget):
             return
         self._render_density_chart()
 
+    def _reset_single_scale(self) -> None:
+        self.scale_input.clear()
+        self._manual_y_max_single = None
+        self._render_density_chart()
+
     def _on_toggle_smoothed_line(self, checked: bool) -> None:
         self._show_smoothed_line = checked
         self._render_density_chart()
