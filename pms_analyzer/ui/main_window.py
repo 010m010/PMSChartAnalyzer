@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import html
 import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 from statistics import mean
 
-from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
+from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal, QUrl
+from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -184,6 +185,8 @@ class SingleAnalysisTab(QWidget):
         self.range_labels: Dict[str, QLabel] = {}
         self.status_label = QLabel(".pms ファイルをドラッグ＆ドロップしてください")
         self.file_label = QLabel("未選択")
+        self.file_open_folder_link = QLabel("")
+        self.file_open_folder_link.setOpenExternalLinks(False)
         self.analyze_button = QPushButton("ファイルを開く")
         self._single_result_callback: Optional[callable[[str, DensityResult, int, Optional[float]], None]] = None
         self._worker: Optional[AnalysisWorker] = None
@@ -202,6 +205,7 @@ class SingleAnalysisTab(QWidget):
         self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.file_label.setMinimumWidth(200)
         file_layout.addWidget(self.file_label, 1)
+        file_layout.addWidget(self.file_open_folder_link)
         main_layout.addLayout(file_layout)
 
         chart_container = QWidget()
@@ -338,6 +342,7 @@ class SingleAnalysisTab(QWidget):
 
         self._set_label_text(self.file_label, self.file_label.text())
         self.analyze_button.clicked.connect(self._open_file_dialog)
+        self.file_open_folder_link.linkActivated.connect(self._open_current_folder)
         self.scale_button.clicked.connect(self._apply_single_scale)
         self.line_toggle_checkbox.toggled.connect(self._on_toggle_smoothed_line)
         self.scale_reset_button.clicked.connect(self._reset_single_scale)
@@ -360,6 +365,7 @@ class SingleAnalysisTab(QWidget):
     def load_file(self, path: Path) -> None:
         self._current_path = path
         self._set_label_text(self.file_label, str(path))
+        self._update_folder_link(path)
         self.status_label.setText("解析中...")
         self._reset_range_metrics()
         self.chart.clear_selection()
@@ -468,6 +474,21 @@ class SingleAnalysisTab(QWidget):
             preserve_selection=True,
         )
         return title_text
+
+    def _update_folder_link(self, path: Path) -> None:
+        if not path.exists():
+            self.file_open_folder_link.clear()
+            return
+        parent = path.parent
+        escaped = html.escape(str(parent))
+        self.file_open_folder_link.setText(f'<a href="{escaped}">フォルダを開く</a>')
+        self.file_open_folder_link.setToolTip(str(parent))
+
+    def _open_current_folder(self, _: str) -> None:
+        if not self._current_path:
+            return
+        folder = self._current_path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _update_info(self, parse_result) -> None:
         def _set_text(key: str, text: str, *, color: str | None = None) -> None:
