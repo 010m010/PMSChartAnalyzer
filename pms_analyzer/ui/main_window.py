@@ -651,6 +651,7 @@ class DifficultyTab(QWidget):
             entry = analysis.entry
             density = analysis.density
             difficulty_display = self._format_difficulty(analysis.difficulty)
+            level_key = difficulty_sort_key(difficulty_display)
             title_text = entry.title
             if entry.subtitle:
                 title_text = f"{entry.title} {entry.subtitle}"
@@ -658,25 +659,44 @@ class DifficultyTab(QWidget):
             if analysis.total_value is not None and analysis.note_count:
                 rate = f"{analysis.total_value / analysis.note_count:.2f}"
 
-            self.table_widget.setItem(row, 0, QTableWidgetItem(difficulty_display))
+            level_item = QTableWidgetItem(difficulty_display)
+            if isinstance(level_key[1], (int, float)):
+                level_item.setData(Qt.ItemDataRole.UserRole, float(level_key[1]))
+            self.table_widget.setItem(row, 0, level_item)
             title_item = QTableWidgetItem(title_text)
             if not analysis.resolved_path:
                 title_item.setForeground(QColor("red"))
                 title_item.setText(f"{title_text}（未解析）")
             self.table_widget.setItem(row, 1, title_item)
-            self.table_widget.setItem(row, 2, QTableWidgetItem(str(analysis.note_count or 0)))
+            notes_item = QTableWidgetItem(str(analysis.note_count or 0))
+            notes_item.setData(Qt.ItemDataRole.UserRole, float(analysis.note_count or 0))
+            self.table_widget.setItem(row, 2, notes_item)
             if analysis.total_value is None:
                 total_item = QTableWidgetItem("未定義")
                 total_item.setForeground(QColor("red"))
             else:
                 total_item = QTableWidgetItem(f"{analysis.total_value:.2f}")
+                total_item.setData(Qt.ItemDataRole.UserRole, float(analysis.total_value))
             self.table_widget.setItem(row, 3, total_item)
-            self.table_widget.setItem(row, 4, QTableWidgetItem(rate))
-            self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.max_density:.2f}"))
-            self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.average_density:.2f}"))
-            self.table_widget.setItem(row, 7, QTableWidgetItem(f"{density.rms_density:.2f}"))
-            self.table_widget.setItem(row, 8, QTableWidgetItem(f"{density.terminal_density:.2f}"))
-            self.table_widget.setItem(row, 9, QTableWidgetItem(f"{density.terminal_rms_density:.2f}"))
+            rate_item = QTableWidgetItem(rate)
+            if rate != "-":
+                rate_item.setData(Qt.ItemDataRole.UserRole, float(rate))
+            self.table_widget.setItem(row, 4, rate_item)
+            max_item = QTableWidgetItem(f"{density.max_density:.2f}")
+            max_item.setData(Qt.ItemDataRole.UserRole, float(density.max_density))
+            self.table_widget.setItem(row, 5, max_item)
+            avg_item = QTableWidgetItem(f"{density.average_density:.2f}")
+            avg_item.setData(Qt.ItemDataRole.UserRole, float(density.average_density))
+            self.table_widget.setItem(row, 6, avg_item)
+            rms_item = QTableWidgetItem(f"{density.rms_density:.2f}")
+            rms_item.setData(Qt.ItemDataRole.UserRole, float(density.rms_density))
+            self.table_widget.setItem(row, 7, rms_item)
+            term_item = QTableWidgetItem(f"{density.terminal_density:.2f}")
+            term_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_density))
+            self.table_widget.setItem(row, 8, term_item)
+            term_rms_item = QTableWidgetItem(f"{density.terminal_rms_density:.2f}")
+            term_rms_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_rms_density))
+            self.table_widget.setItem(row, 9, term_rms_item)
             self.table_widget.setItem(row, 10, QTableWidgetItem(analysis.md5 or ""))
             self.table_widget.setItem(row, 11, QTableWidgetItem(analysis.sha256 or ""))
             self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
