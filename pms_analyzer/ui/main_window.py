@@ -899,6 +899,8 @@ class DifficultyTab(QWidget):
         self._render_chart()
 
     def _render_table_and_chart(self) -> None:
+        self._sync_filter_options()
+        self._apply_filter_defaults()
         analyses = self._latest_analyses
         visible = [a for a in analyses if self._is_difficulty_visible(a.difficulty)]
         sorting_state = self.table_widget.isSortingEnabled()
@@ -980,8 +982,13 @@ class DifficultyTab(QWidget):
             self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
         self._render_chart()
         self._render_summary()
-        self._sync_filter_options()
-        self._apply_filter_defaults()
+
+    def _reset_sorting(self) -> None:
+        header = self.table_widget.horizontalHeader()
+        self.table_widget.setSortingEnabled(False)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        self.table_widget.setSortingEnabled(True)
+        self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
 
     def _format_difficulty(self, value: str) -> str:
         symbol = self._current_symbol or ""
