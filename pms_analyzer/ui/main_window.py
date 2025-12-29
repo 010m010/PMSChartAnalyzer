@@ -178,6 +178,7 @@ class SingleAnalysisTab(QWidget):
         self._manual_y_max_single: float | None = None
         self._latest_single_parse = None
         self._latest_single_density = None
+        self._show_smoothed_line = True
         self.info_labels: Dict[str, QLabel] = {}
         self.metrics_labels: Dict[str, QLabel] = {}
         self.range_labels: Dict[str, QLabel] = {}
@@ -203,6 +204,13 @@ class SingleAnalysisTab(QWidget):
         chart_layout = QVBoxLayout()
         chart_layout.setContentsMargins(0, 0, 0, 0)
         chart_layout.addWidget(self.chart)
+
+        line_toggle_layout = QHBoxLayout()
+        self.line_toggle_checkbox = QCheckBox("線グラフを表示")
+        self.line_toggle_checkbox.setChecked(True)
+        line_toggle_layout.addStretch()
+        line_toggle_layout.addWidget(self.line_toggle_checkbox)
+        chart_layout.addLayout(line_toggle_layout)
 
         scale_layout = QHBoxLayout()
         scale_layout.addStretch()
@@ -327,6 +335,7 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.file_label, self.file_label.text())
         self.analyze_button.clicked.connect(self._open_file_dialog)
         self.scale_button.clicked.connect(self._apply_single_scale)
+        self.line_toggle_checkbox.toggled.connect(self._on_toggle_smoothed_line)
         self.scale_reset_button.clicked.connect(self._reset_single_scale)
         self.chart.set_selection_callback(self._on_range_selected)
         self._reset_range_metrics()
@@ -358,16 +367,7 @@ class SingleAnalysisTab(QWidget):
     def _on_finished(self, parse_result, density: DensityResult) -> None:
         self._latest_single_parse = parse_result
         self._latest_single_density = density
-        title_text = parse_result.title
-        if parse_result.subtitle:
-            title_text = f"{parse_result.title} {parse_result.subtitle}"
-        self.chart.plot(
-            density.per_second_by_key,
-            title=title_text,
-            total_time=density.duration,
-            terminal_window=density.terminal_window,
-            y_max=self._manual_y_max_single,
-        )
+        title_text = self._render_density_chart()
         self._update_info(parse_result)
         self._update_metrics(density)
         self.status_label.setText(f"解析完了: {title_text}")
@@ -416,6 +416,7 @@ class SingleAnalysisTab(QWidget):
         text = self.scale_input.text().strip()
         if not text:
             self._manual_y_max_single = None
+            self._render_density_chart()
             self._refresh_single_chart()
             return
         try:
@@ -426,12 +427,29 @@ class SingleAnalysisTab(QWidget):
         except ValueError:
             QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
             return
-        self._refresh_single_chart()
+        self._render_density_chart()
 
-    def _reset_single_scale(self) -> None:
-        self.scale_input.clear()
-        self._manual_y_max_single = None
-        self._refresh_single_chart()
+    def _on_toggle_smoothed_line(self, checked: bool) -> None:
+        self._show_smoothed_line = checked
+        self._render_density_chart()
+
+    def _render_density_chart(self) -> str:
+        if not self._latest_single_density or not self._latest_single_parse:
+            return ""
+        parse_result = self._latest_single_parse
+        density = self._latest_single_density
+        title_text = parse_result.title
+        if parse_result.subtitle:
+            title_text = f"{parse_result.title} {parse_result.subtitle}"
+        self.chart.plot(
+            density.per_second_by_key,
+            title=title_text,
+            total_time=density.duration,
+            terminal_window=density.terminal_window,
+            y_max=self._manual_y_max_single,
+            show_smoothed_line=self._show_smoothed_line,
+        )
+        return title_text
 
     def _update_info(self, parse_result) -> None:
         def _set_text(key: str, text: str, *, color: str | None = None) -> None:
