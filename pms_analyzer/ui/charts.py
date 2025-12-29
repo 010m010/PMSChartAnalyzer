@@ -223,11 +223,22 @@ class StackedDensityChart(FigureCanvasQTAgg):
         return smoothed.tolist()
 
     def _adaptive_window_length(self, length: int) -> int:
+        """Choose a smoothing window that keeps short spikes visible.
+
+        秒間密度の線グラフでは 1〜3 秒程度の局所的な山を埋もれさせないことが
+        重要なので、窓幅は以前よりも小さく、最大でも 9 秒程度に抑える。
+        長い譜面でも滑らかさを維持しつつ、鋭いピークを残すために奇数長の窓を
+        緩やかに拡大する。
+        """
         if length < 5:
             base = length if length % 2 == 1 else length - 1
             return max(base, 3)
-        window = max(5, (length // 12) * 2 + 1)
-        window = min(window, 25)
+
+        # Expand slowly (約 24 秒で 2 サンプル増加) and clamp to a short window so that
+        # 1〜3 秒の密度上昇を平滑化しすぎない。
+        window = max(5, (length // 24) * 2 + 3)
+        window = min(window, 9)
+
         if window >= length:
             window = length if length % 2 == 1 else length - 1
         if window < 3:
