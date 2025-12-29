@@ -174,6 +174,7 @@ class SingleAnalysisTab(QWidget):
         self.scale_input = QLineEdit()
         self.scale_input.setPlaceholderText("縦軸の最大値を入力")
         self.scale_button = QPushButton("更新")
+        self.scale_reset_button = QPushButton("リセット")
         self._manual_y_max_single: float | None = None
         self._latest_single_parse = None
         self._latest_single_density = None
@@ -208,6 +209,7 @@ class SingleAnalysisTab(QWidget):
         scale_layout.addWidget(QLabel("縦軸の最大値:"))
         scale_layout.addWidget(self.scale_input)
         scale_layout.addWidget(self.scale_button)
+        scale_layout.addWidget(self.scale_reset_button)
         chart_layout.addLayout(scale_layout)
         chart_container.setLayout(chart_layout)
 
@@ -325,6 +327,7 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.file_label, self.file_label.text())
         self.analyze_button.clicked.connect(self._open_file_dialog)
         self.scale_button.clicked.connect(self._apply_single_scale)
+        self.scale_reset_button.clicked.connect(self._reset_single_scale)
         self.chart.set_selection_callback(self._on_range_selected)
         self._reset_range_metrics()
 
@@ -397,19 +400,7 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
         self._reset_range_metrics()
 
-    def _apply_single_scale(self) -> None:
-        text = self.scale_input.text().strip()
-        if not text:
-            self._manual_y_max_single = None
-            return
-        try:
-            value = float(text)
-            if value <= 0:
-                raise ValueError
-            self._manual_y_max_single = value
-        except ValueError:
-            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
-            return
+    def _refresh_single_chart(self) -> None:
         if self._latest_single_density and self._latest_single_parse:
             parse_result = self._latest_single_parse
             density = self._latest_single_density
@@ -420,6 +411,27 @@ class SingleAnalysisTab(QWidget):
                 terminal_window=density.terminal_window,
                 y_max=self._manual_y_max_single,
             )
+
+    def _apply_single_scale(self) -> None:
+        text = self.scale_input.text().strip()
+        if not text:
+            self._manual_y_max_single = None
+            self._refresh_single_chart()
+            return
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+            self._manual_y_max_single = value
+        except ValueError:
+            QMessageBox.warning(self, "不正な値", "0 より大きい数値を入力してください")
+            return
+        self._refresh_single_chart()
+
+    def _reset_single_scale(self) -> None:
+        self.scale_input.clear()
+        self._manual_y_max_single = None
+        self._refresh_single_chart()
 
     def _update_info(self, parse_result) -> None:
         def _set_text(key: str, text: str, *, color: str | None = None) -> None:
@@ -616,6 +628,7 @@ class DifficultyTab(QWidget):
         self.scale_max_input = QLineEdit()
         self.scale_max_input.setPlaceholderText("縦軸の最大値")
         self.scale_button = QPushButton("更新")
+        self.scale_reset_button = QPushButton("リセット")
         self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
@@ -679,6 +692,7 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(QLabel("～"))
         metric_layout.addWidget(self.scale_max_input)
         metric_layout.addWidget(self.scale_button)
+        metric_layout.addWidget(self.scale_reset_button)
 
         chart_area = QWidget()
         chart_area_layout = QVBoxLayout()
@@ -731,6 +745,7 @@ class DifficultyTab(QWidget):
         self.chart_type_selector.currentTextChanged.connect(lambda: self._refresh_chart_only(clear_scale=True))
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
         self.scale_button.clicked.connect(self._apply_manual_scale)
+        self.scale_reset_button.clicked.connect(self._reset_manual_scale)
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
@@ -1100,6 +1115,13 @@ class DifficultyTab(QWidget):
         except ValueError:
             QMessageBox.warning(self, "不正な値", "数値を正しく入力し、最小値は最大値より小さくしてください")
             return
+        self._refresh_chart_only()
+
+    def _reset_manual_scale(self) -> None:
+        self.scale_min_input.clear()
+        self.scale_max_input.clear()
+        self._manual_y_min = None
+        self._manual_y_max = None
         self._refresh_chart_only()
 
     def _open_filter_dialog(self) -> None:
