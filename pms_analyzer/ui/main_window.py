@@ -609,10 +609,7 @@ class DifficultyTab(QWidget):
         header = self.table_widget.horizontalHeader()
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
-        header.setStyleSheet(
-            "QHeaderView::down-arrow {image: url(:/qt-project.org/styles/commonstyle/images/up_arrow.png);} "
-            "QHeaderView::up-arrow {image: url(:/qt-project.org/styles/commonstyle/images/down_arrow.png);}"
-        )
+        header.setSectionsClickable(True)
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.load_button = QPushButton("読み込む")
         self.analyze_button = QPushButton("更新")
@@ -678,6 +675,7 @@ class DifficultyTab(QWidget):
         chart_container = QWidget()
         chart_layout = QVBoxLayout()
         chart_layout.setContentsMargins(0, 0, 0, 0)
+        chart_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         metric_layout = QHBoxLayout()
         metric_layout.addStretch()
         metric_layout.addWidget(QLabel("縦軸:"))
@@ -726,8 +724,14 @@ class DifficultyTab(QWidget):
         table_tabs.addTab(table_tab, "譜面一覧")
         table_tabs.addTab(summary_tab, "難易度統計")
 
-        layout.addWidget(chart_container)
-        layout.addWidget(table_tabs)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(chart_container)
+        splitter.addWidget(table_tabs)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+
+        layout.addWidget(splitter)
         self.setLayout(layout)
 
         self.load_button.clicked.connect(self._select_table)
