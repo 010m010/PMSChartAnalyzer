@@ -93,6 +93,13 @@ def build_widget_styles(dark: bool) -> str:
     popup = "#1F1F1F" if dark else "#FFFFFF"
     disabled = "#9BA3AE" if dark else "#7A8395"
     highlight = "#4A9DDE" if dark else "#2F7ACC"
+    table_border = "#8FA2B8" if dark else "#7D8CA3"
+    arrow_color = "%23E6E6E6" if dark else "%231D2835"
+    arrow_icon = (
+        f"data:image/svg+xml;utf8,"
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'>"
+        f"<path fill='{arrow_color}' d='M1 1l5 6 5-6z'/></svg>"
+    )
 
     return f"""
     QGroupBox {{
@@ -114,12 +121,25 @@ def build_widget_styles(dark: bool) -> str:
         border-radius: 4px;
         padding: 4px 6px;
     }}
+    QComboBox {{
+        padding-right: 28px;
+    }}
     QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled {{
         color: {disabled};
     }}
     QComboBox::drop-down {{
         border-left: 1px solid {border};
         width: 18px;
+        background-color: {base};
+    }}
+    QComboBox::down-arrow {{
+        image: url("{arrow_icon}");
+        width: 12px;
+        height: 8px;
+        margin-right: 6px;
+    }}
+    QComboBox::down-arrow:on {{
+        top: 1px;
     }}
     QComboBox QAbstractItemView {{
         background-color: {popup};
@@ -147,6 +167,21 @@ def build_widget_styles(dark: bool) -> str:
         height: 1px;
         background: {border};
         margin: 4px 6px;
+    }}
+    QTableWidget, QTableView {{
+        background-color: {popup};
+        alternate-background-color: {base};
+        color: {text};
+        gridline-color: {table_border};
+        border: 1px solid {table_border};
+        selection-background-color: {highlight};
+        selection-color: #ffffff;
+    }}
+    QHeaderView::section {{
+        background-color: {base};
+        color: {text};
+        border: 1px solid {table_border};
+        padding: 4px;
     }}
     """
 

@@ -58,22 +58,23 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
-        face = "#1f1f1f" if dark else "#ffffff"
+        face = "#1f1f1f" if dark else "#f2f4f8"
         text = "#e6e6e6" if dark else "#1D2835"
-        grid = "#555555" if dark else "#c7d0dd"
+        grid = "#555555" if dark else "#b8c5d3"
+        border = "#9fb4c9" if dark else "#556075"
         accent = "#7CC7FF" if dark else "#2F7ACC"
 
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text)
         self.ax.tick_params(axis="y", colors=text)
-        self.ax.spines["bottom"].set_color(text)
-        self.ax.spines["left"].set_color(text)
-        self.ax.spines["top"].set_visible(False)
-        self.ax.spines["right"].set_visible(False)
+        for spine in self.ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color(border)
+            spine.set_linewidth(1.0)
         self.ax.set_xlabel("Seconds", color=text)
         self.ax.set_ylabel("Notes", color=text)
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
         self.ax.tick_params(axis="x", labelcolor=text)
         self.ax.tick_params(axis="y", labelcolor=text)
         self.ax.title.set_color(text)
@@ -103,8 +104,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
         colors = [self._color_for_density(val) for val in totals]
         self._bar_colors = colors
         self._bars = self.ax.bar(x, totals, color=colors, width=0.9)
-        grid = "#555555" if dark else "#c7d0dd"
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
+        grid = "#555555" if dark else "#b8c5d3"
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
         if title:
             self.ax.set_title(title, color="#e6e6e6" if dark else "#1D2835")
         else:
@@ -114,6 +115,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
             start_bin = int(start)
             end_bin = len(per_second_by_key)
             face = "#3A3A3A" if dark else "#DCE5F0"
+            label_color = "#e6e6e6" if dark else "#0F3D73"
             start_edge = max(start_bin - 0.5, -0.5)
             end_edge = end_bin - 0.5
             self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
@@ -121,8 +123,9 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 max(start_edge + 0.2, 0.0),
                 self.ax.get_ylim()[1] * 0.9,
                 "終端範囲",
-                color="#e6e6e6" if dark else "#1D2835",
+                color=label_color,
                 fontsize=9,
+                bbox=dict(facecolor=face, alpha=0.35, edgecolor="none", boxstyle="round,pad=0.2"),
             )
         smoothed = self._smooth_density_wave(totals)
         if show_smoothed_line and smoothed:
@@ -217,27 +220,33 @@ class StackedDensityChart(FigureCanvasQTAgg):
             return []
         if len(totals) < 3:
             return [float(val) for val in totals]
-        window_length = self._adaptive_window_length(len(totals))
+        window_length = self._adaptive_window_length(len(totals), totals)
         polyorder = min(3, window_length - 1)
         smoothed = self._savgol_smooth(np.array(totals, dtype=float), window_length, polyorder)
         return smoothed.tolist()
 
-    def _adaptive_window_length(self, length: int) -> int:
+    def _adaptive_window_length(self, length: int, totals: list[int]) -> int:
         """Choose a smoothing window that keeps short spikes visible.
 
         秒間密度の線グラフでは 1〜3 秒程度の局所的な山を埋もれさせないことが
-        重要なので、窓幅は以前よりも小さく、最大でも 9 秒程度に抑える。
-        長い譜面でも滑らかさを維持しつつ、鋭いピークを残すために奇数長の窓を
-        緩やかに拡大する。
+        重要なので、窓幅は以前よりも小さく、最大でも 7 秒程度に抑える。
+        変化が大きい譜面では窓幅をさらに縮め、鋭いピークを残す。
         """
         if length < 5:
             base = length if length % 2 == 1 else length - 1
             return max(base, 3)
 
-        # Expand slowly (約 24 秒で 2 サンプル増加) and clamp to a short window so that
-        # 1〜3 秒の密度上昇を平滑化しすぎない。
-        window = max(5, (length // 24) * 2 + 3)
-        window = min(window, 9)
+        diffs = np.abs(np.diff(totals)) if len(totals) > 1 else np.array([0.0])
+        normalized_variation = float(np.percentile(diffs, 75)) / (float(np.mean(totals)) + 1e-6)
+        growth = max(0, min(2, length // 60))
+        window = 3 + growth
+
+        if normalized_variation < 0.15:
+            window += 1
+        if normalized_variation < 0.05:
+            window += 1
+
+        window = min(window, 7)
 
         if window >= length:
             window = length if length % 2 == 1 else length - 1
@@ -297,20 +306,21 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
-        face = "#1f1f1f" if dark else "#ffffff"
-        text = "#e6e6e6" if dark else "#202020"
-        grid = "#555555" if dark else "#c7d0dd"
+        face = "#1f1f1f" if dark else "#f2f4f8"
+        text = "#e6e6e6" if dark else "#1D2835"
+        grid = "#555555" if dark else "#b8c5d3"
+        border = "#9fb4c9" if dark else "#556075"
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text, rotation=45)
         self.ax.tick_params(axis="y", colors=text)
-        for spine in ("bottom", "left"):
-            self.ax.spines[spine].set_color(text)
-        for spine in ("top", "right"):
-            self.ax.spines[spine].set_visible(False)
+        for spine in self.ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color(border)
+            spine.set_linewidth(1.0)
         self.ax.set_title(self.ax.get_title(), color=text)
         self.ax.set_ylabel(self.ax.get_ylabel(), color=text)
-        self.ax.grid(True, linestyle=":", linewidth=0.6, color=grid)
+        self.ax.grid(True, linestyle=":", linewidth=0.7, color=grid)
 
     def plot(self, values: Dict[str, List[float]], metric_name: str, *, y_limits: Optional[tuple[float, float]] = None) -> None:
         self.ax.clear()
@@ -374,20 +384,21 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, y_label: str = "密度", *, dark: bool) -> None:
-        face = "#1f1f1f" if dark else "#ffffff"
+        face = "#1f1f1f" if dark else "#f2f4f8"
         text = "#e6e6e6" if dark else "#1D2835"
-        grid = "#555555" if dark else "#c7d0dd"
+        grid = "#555555" if dark else "#b8c5d3"
+        border = "#9fb4c9" if dark else "#556075"
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text, rotation=45)
         self.ax.tick_params(axis="y", colors=text)
-        for spine in ("bottom", "left"):
-            self.ax.spines[spine].set_color(text)
-        for spine in ("top", "right"):
-            self.ax.spines[spine].set_visible(False)
+        for spine in self.ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color(border)
+            spine.set_linewidth(1.0)
         self.ax.set_xlabel("難易度", color=text)
         self.ax.set_ylabel(y_label, color=text)
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
 
     def plot(
         self,
@@ -414,8 +425,8 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         marker_color = "#7CC7FF" if dark else "#2F7ACC"
         self.ax.scatter(x, y_vals, c=marker_color, alpha=0.85)
         self.ax.set_xticks(list(pos_map.values()), labels=unique)
-        grid = "#555555" if dark else "#c7d0dd"
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
+        grid = "#555555" if dark else "#b8c5d3"
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
         if y_limits:
             self.ax.set_ylim(*y_limits)
         self.figure.tight_layout()
