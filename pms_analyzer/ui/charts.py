@@ -6,6 +6,7 @@ import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
+from matplotlib.widgets import SpanSelector
 from PyQt6.QtGui import QPalette, QGuiApplication
 
 from ..theme import system_prefers_dark
@@ -25,6 +26,18 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
+        self._bars = None
+        self._bar_colors: list[str] = []
+        self._selection_callback: Optional[Callable[[float, float], None]] = None
+        self._selection_artist = None
+        self._span_selector = SpanSelector(
+            self.ax,
+            self._on_span_select,
+            "horizontal",
+            useblit=True,
+            props={"facecolor": "#66ccff", "alpha": 0.15},
+            interactive=True,
+        )
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -68,16 +81,19 @@ class StackedDensityChart(FigureCanvasQTAgg):
         y_max: float | None = None,
     ) -> None:
         self.ax.clear()
+        self._clear_selection()
         dark = self._is_dark_mode()
         self._style_axes(dark=dark)
         if not per_second_by_key:
             self.draw()
             return
+        self._bar_colors = []
 
         totals = [sum(row) for row in per_second_by_key]
         x = list(range(len(per_second_by_key)))
         colors = [self._color_for_density(val) for val in totals]
-        self.ax.bar(x, totals, color=colors, width=0.9)
+        self._bar_colors = colors
+        self._bars = self.ax.bar(x, totals, color=colors, width=0.9)
         grid = "#444" if dark else "#ccc"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
         if title:
@@ -89,9 +105,11 @@ class StackedDensityChart(FigureCanvasQTAgg):
             start_bin = int(start)
             end_bin = len(per_second_by_key)
             face = "#888888" if dark else "#CCCCCC"
-            self.ax.axvspan(start_bin, end_bin, color=face, alpha=0.2, zorder=0)
+            start_edge = max(start_bin - 0.5, -0.5)
+            end_edge = end_bin - 0.5
+            self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
             self.ax.text(
-                start_bin + 0.2,
+                max(start_edge + 0.2, 0.0),
                 self.ax.get_ylim()[1] * 0.9,
                 "終端範囲",
                 color="black" if not dark else "white",
@@ -108,6 +126,62 @@ class StackedDensityChart(FigureCanvasQTAgg):
         cmap = cm.get_cmap("plasma", 10)
         r, g, b, _ = cmap(bucket)
         return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
+
+    def set_selection_callback(self, callback: Optional[Callable[[float, float], None]]) -> None:
+        self._selection_callback = callback
+
+    def clear_selection(self) -> None:
+        self._clear_selection()
+
+    def _on_span_select(self, x_min: float, x_max: float) -> None:
+        if x_min is None or x_max is None:
+            return
+        start_raw, end_raw = sorted([x_min, x_max])
+        start_bin = max(int(start_raw // 1), 0)
+        end_bin = max(start_bin + 1, int((-(-end_raw // 1))))  # ceil for ints
+        if self._bars:
+            end_bin = min(end_bin, len(self._bars))
+        self._draw_selection_region(start_bin, end_bin)
+        if self._selection_callback:
+            self._selection_callback(float(start_bin), float(end_bin))
+
+    def _draw_selection_region(self, start_bin: int, end_bin: int) -> None:
+        if self._selection_artist:
+            try:
+                self._selection_artist.remove()
+            except ValueError:
+                pass
+        face = "#66CCFF" if not self._is_dark_mode() else "#2E8BC0"
+        start_edge = start_bin - 0.5
+        end_edge = end_bin - 0.5
+        self._selection_artist = self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
+        self._apply_bar_highlight(start_bin, end_bin)
+        self.draw_idle()
+
+    def _clear_selection(self) -> None:
+        if self._selection_artist:
+            try:
+                self._selection_artist.remove()
+            except ValueError:
+                pass
+            self._selection_artist = None
+        if self._bars:
+            for patch, color in zip(self._bars, self._bar_colors):
+                patch.set_color(color)
+        self.draw_idle()
+
+    def _apply_bar_highlight(self, start_bin: int, end_bin: int) -> None:
+        if not self._bars:
+            return
+        for idx, patch in enumerate(self._bars):
+            if idx < len(self._bar_colors):
+                base_color = self._bar_colors[idx]
+            else:
+                base_color = patch.get_facecolor()
+            if start_bin <= idx < end_bin:
+                patch.set_color("#3BA7FF")
+            else:
+                patch.set_color(base_color)
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
