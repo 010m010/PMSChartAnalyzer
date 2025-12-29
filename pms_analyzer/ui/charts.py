@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 from matplotlib.widgets import SpanSelector
 import numpy as np
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPalette, QGuiApplication
 
 from ..theme import system_prefers_dark
@@ -35,6 +36,9 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._x_limits: tuple[float, float] | None = None
         self._selected_bins: tuple[int, int] | None = None
         self._last_plot_state: dict[str, object] | None = None
+        self._resize_debounce_timer = QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.timeout.connect(lambda: self._handle_resize_redraw())
         self._span_selector = SpanSelector(
             self.ax,
             self._on_span_select,
@@ -176,11 +180,17 @@ class StackedDensityChart(FigureCanvasQTAgg):
     def _on_span_select(self, x_min: float, x_max: float) -> None:
         if x_min is None or x_max is None:
             return
-        start_raw, end_raw = sorted([x_min, x_max])
-        start_bin = max(int(start_raw // 1), 0)
-        end_bin = max(start_bin + 1, int((-(-end_raw // 1))))  # ceil for ints
+        span_start, span_end = sorted([x_min, x_max])
+        start_bin = int(np.ceil(span_start + self._bar_width / 2))
+        end_inclusive = int(np.floor(span_end - self._bar_width / 2))
         if self._bars:
-            end_bin = min(end_bin, len(self._bars))
+            max_index = len(self._bars) - 1
+            start_bin = max(0, min(start_bin, max_index))
+            end_inclusive = max(start_bin, min(end_inclusive, max_index))
+        end_bin = end_inclusive + 1
+        if end_bin <= start_bin:
+            self._clear_selection()
+            return
         self._draw_selection_region(start_bin, end_bin, update_saved=True)
         if self._selection_callback:
             self._selection_callback(float(start_bin), float(end_bin))
@@ -257,6 +267,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
         window_length = self._adaptive_window_length(len(totals), totals)
         polyorder = min(3, window_length - 1)
         smoothed = self._savgol_smooth(np.array(totals, dtype=float), window_length, polyorder)
+        gaussian_sigma = 1.2 if len(totals) < 120 else 1.5
+        smoothed = self._gaussian_smooth(smoothed, sigma=gaussian_sigma)
         return smoothed.tolist()
 
     def _adaptive_window_length(self, length: int, totals: list[int]) -> int:
@@ -273,14 +285,14 @@ class StackedDensityChart(FigureCanvasQTAgg):
         diffs = np.abs(np.diff(totals)) if len(totals) > 1 else np.array([0.0])
         normalized_variation = float(np.percentile(diffs, 75)) / (float(np.mean(totals)) + 1e-6)
         growth = max(0, min(3, length // 60))
-        window = 4 + growth
+        window = 5 + growth
 
         if normalized_variation < 0.15:
             window += 2
         if normalized_variation < 0.05:
             window += 1
 
-        window = min(window, 9)
+        window = min(window, 11)
 
         if window >= length:
             window = length if length % 2 == 1 else length - 1
@@ -289,6 +301,16 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if window % 2 == 0:
             window -= 1
         return window
+
+    def _gaussian_smooth(self, values: np.ndarray, *, sigma: float) -> np.ndarray:
+        if sigma <= 0:
+            return values
+        radius = max(1, int(3 * sigma))
+        x = np.arange(-radius, radius + 1, dtype=float)
+        kernel = np.exp(-(x**2) / (2 * sigma**2))
+        kernel /= kernel.sum()
+        padded = np.pad(values, (radius, radius), mode="edge")
+        return np.convolve(padded, kernel, mode="valid")
 
     def _savgol_smooth(self, values: np.ndarray, window_length: int, polyorder: int) -> np.ndarray:
         half_window = window_length // 2
@@ -328,10 +350,16 @@ class StackedDensityChart(FigureCanvasQTAgg):
             preserve_selection=preserve_selection,
         )
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def _handle_resize_redraw(self) -> None:
         self.figure.tight_layout()
         self._redraw_last_plot(preserve_selection=True)
+
+    def _schedule_resize_redraw(self) -> None:
+        self._resize_debounce_timer.start(180)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._schedule_resize_redraw()
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
@@ -342,6 +370,9 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
         self._last_plot_state: dict[str, object] | None = None
+        self._resize_debounce_timer = QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.timeout.connect(self._handle_resize_redraw)
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -441,10 +472,16 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
             overlay_line=self._last_plot_state["overlay_line"],
         )
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def _handle_resize_redraw(self) -> None:
         self.figure.tight_layout()
         self._redraw_last_plot()
+
+    def _schedule_resize_redraw(self) -> None:
+        self._resize_debounce_timer.start(180)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._schedule_resize_redraw()
 
 
 class DifficultyScatterChart(FigureCanvasQTAgg):
@@ -456,6 +493,9 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
         self._last_plot_state: dict[str, object] | None = None
+        self._resize_debounce_timer = QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.timeout.connect(self._handle_resize_redraw)
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -556,10 +596,16 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             overlay_line=self._last_plot_state["overlay_line"],
         )
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
+    def _handle_resize_redraw(self) -> None:
         self.figure.tight_layout()
         self._redraw_last_plot()
+
+    def _schedule_resize_redraw(self) -> None:
+        self._resize_debounce_timer.start(180)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._schedule_resize_redraw()
 
 
 __all__ = ["StackedDensityChart", "BoxPlotCanvas", "DifficultyScatterChart"]
