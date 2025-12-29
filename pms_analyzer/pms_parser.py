@@ -211,7 +211,12 @@ class PMSParser:
             previous_measure = measure
 
         notes.sort(key=lambda n: n.time)
-        return notes, current_time, (base_bpm, min_bpm, max_bpm)
+        unique_notes: List[Note] = []
+        for note in notes:
+            if unique_notes and note.key_index == unique_notes[-1].key_index and abs(note.time - unique_notes[-1].time) < 1e-6:
+                continue
+            unique_notes.append(note)
+        return unique_notes, current_time, (base_bpm, min_bpm, max_bpm)
 
     def _expand_measure_events(
         self, measure_data: Iterable[Tuple[int, str]], bpm_defs: Dict[str, float]

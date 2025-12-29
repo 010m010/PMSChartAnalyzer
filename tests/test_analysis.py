@@ -82,3 +82,19 @@ def test_mine_channels_are_ignored(tmp_path: Path) -> None:
 
     # Channel 16 is a mine; only the playable note on channel 11 should be counted
     assert len(result.notes) == 1
+
+
+def test_duplicate_notes_collapsed(tmp_path: Path) -> None:
+    content = """
+#BPM 120
+#00011:0100
+#00051:0100
+    """.strip()
+    file_path = tmp_path / "dupe.pms"
+    file_path.write_text(content, encoding="utf-8")
+
+    parser = PMSParser()
+    result = parser.parse(file_path)
+
+    # Same timing, same lane (11 and 51 map to lane 1); should count as one note
+    assert len(result.notes) == 1
