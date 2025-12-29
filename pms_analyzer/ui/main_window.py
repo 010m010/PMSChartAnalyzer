@@ -640,19 +640,6 @@ class DifficultyTab(QWidget):
         layout.addWidget(self.loading_label)
         layout.addWidget(self.songdata_label)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setChildrenCollapsible(False)
-
-        table_container = QWidget()
-        table_layout = QVBoxLayout()
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.addWidget(self.table_widget)
-        table_container.setLayout(table_layout)
-
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(self.filter_button)
-        filter_layout.addStretch()
-
         chart_container = QWidget()
         chart_layout = QVBoxLayout()
         chart_layout.setContentsMargins(0, 0, 0, 0)
@@ -674,7 +661,22 @@ class DifficultyTab(QWidget):
         chart_area_layout.addWidget(self.box_chart)
         chart_area.setLayout(chart_area_layout)
 
-        summary_container = QWidget()
+        chart_layout.addWidget(chart_area)
+        chart_container.setLayout(chart_layout)
+
+        table_tabs = QTabWidget()
+
+        table_tab = QWidget()
+        table_tab_layout = QVBoxLayout()
+        table_tab_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(self.filter_button)
+        filter_layout.addStretch()
+        table_tab_layout.addLayout(filter_layout)
+        table_tab_layout.addWidget(self.table_widget)
+        table_tab.setLayout(table_tab_layout)
+
+        summary_tab = QWidget()
         summary_layout = QVBoxLayout()
         summary_layout.setContentsMargins(0, 0, 0, 0)
         summary_header = QHBoxLayout()
@@ -684,20 +686,13 @@ class DifficultyTab(QWidget):
         summary_header.addWidget(self.summary_metric_selector)
         summary_layout.addLayout(summary_header)
         summary_layout.addWidget(self.summary_table)
-        summary_container.setLayout(summary_layout)
+        summary_tab.setLayout(summary_layout)
 
-        chart_splitter = QSplitter(Qt.Orientation.Vertical)
-        chart_splitter.setChildrenCollapsible(False)
-        chart_splitter.addWidget(chart_area)
-        chart_splitter.addWidget(summary_container)
+        table_tabs.addTab(table_tab, "譜面一覧")
+        table_tabs.addTab(summary_tab, "難易度統計")
 
-        chart_layout.addWidget(chart_splitter)
-        chart_container.setLayout(chart_layout)
-
-        splitter.addWidget(table_container)
-        splitter.addWidget(chart_container)
-        layout.addLayout(filter_layout)
-        layout.addWidget(splitter)
+        layout.addWidget(chart_container)
+        layout.addWidget(table_tabs)
         self.setLayout(layout)
 
         self.load_button.clicked.connect(self._select_table)
