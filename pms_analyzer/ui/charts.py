@@ -28,6 +28,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
         self._bars = None
+        self._bar_width: float = 0.9
         self._bar_colors: list[str] = []
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
@@ -103,7 +104,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         x = list(range(len(per_second_by_key)))
         colors = [self._color_for_density(val) for val in totals]
         self._bar_colors = colors
-        self._bars = self.ax.bar(x, totals, color=colors, width=0.9)
+        self._bars = self.ax.bar(x, totals, color=colors, width=self._bar_width)
         grid = "#555555" if dark else "#b8c5d3"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
         if title:
@@ -199,6 +200,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if self._bars:
             for patch, color in zip(self._bars, self._bar_colors):
                 patch.set_color(color)
+                patch.set_width(self._bar_width)
         self._restore_x_limits()
         self.draw_idle()
 
@@ -206,6 +208,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if not self._bars:
             return
         for idx, patch in enumerate(self._bars):
+            patch.set_width(self._bar_width)
             if idx < len(self._bar_colors):
                 base_color = self._bar_colors[idx]
             else:
