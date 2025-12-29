@@ -34,13 +34,14 @@ def system_prefers_dark() -> bool:
     return window_color.lightness() < 128
 
 
-def apply_app_palette(app: QApplication, mode: str) -> None:
+def apply_app_palette(app: QApplication, mode: str) -> bool:
     """
-    Apply a light/dark/system palette to the whole application.
+    Apply a light/dark/system palette to the whole application and return whether dark mode is active.
     """
 
     palette = QPalette()
-    if mode == "dark" or (mode == "system" and system_prefers_dark()):
+    dark_mode = mode == "dark" or (mode == "system" and system_prefers_dark())
+    if dark_mode:
         palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
         palette.setColor(QPalette.ColorRole.WindowText, QColor(230, 230, 230))
         palette.setColor(QPalette.ColorRole.Base, QColor(24, 24, 24))
@@ -59,20 +60,95 @@ def apply_app_palette(app: QApplication, mode: str) -> None:
         palette.setColor(QPalette.ColorRole.Mid, QColor(70, 70, 70))
         palette.setColor(QPalette.ColorRole.Dark, QColor(18, 18, 18))
         palette.setColor(QPalette.ColorRole.Shadow, QColor(10, 10, 10))
-        app.setPalette(palette)
     else:
         palette = app.style().standardPalette()
         # Ensure readable dark text on light backgrounds even after switching from dark mode
-        dark_text = QColor(20, 20, 20)
+        dark_text = QColor(20, 28, 53)
+        palette.setColor(QPalette.ColorRole.Window, QColor(248, 250, 253))
+        palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(242, 246, 252))
+        palette.setColor(QPalette.ColorRole.Button, QColor(236, 240, 245))
+        palette.setColor(QPalette.ColorRole.Shadow, QColor(175, 185, 200))
+        palette.setColor(QPalette.ColorRole.Mid, QColor(205, 213, 225))
+        palette.setColor(QPalette.ColorRole.Dark, QColor(185, 195, 210))
         palette.setColor(QPalette.ColorRole.WindowText, dark_text)
         palette.setColor(QPalette.ColorRole.Text, dark_text)
         palette.setColor(QPalette.ColorRole.ButtonText, dark_text)
         palette.setColor(QPalette.ColorRole.ToolTipText, dark_text)
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(47, 122, 204))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(80, 80, 80, 180))
         palette.setColor(QPalette.ColorRole.Link, QColor(0, 90, 180))
         palette.setColor(QPalette.ColorRole.LinkVisited, QColor(120, 70, 200))
-        app.setPalette(palette)
+
+    app.setPalette(palette)
+    app.setStyleSheet(build_widget_styles(dark_mode))
+    return dark_mode
+
+def build_widget_styles(dark: bool) -> str:
+    border = "#6A6A6A" if dark else "#9AA5B5"
+    text = "#E6E6E6" if dark else "#1D2835"
+    base = "#2B2B2B" if dark else "#F5F7FA"
+    hover = "#3A3A3A" if dark else "#E5ECF4"
+    popup = "#1F1F1F" if dark else "#FFFFFF"
+    disabled = "#9BA3AE" if dark else "#7A8395"
+    highlight = "#4A9DDE" if dark else "#2F7ACC"
+
+    return f"""
+    QGroupBox {{
+        border: 1px solid {border};
+        border-radius: 4px;
+        margin-top: 8px;
+        padding: 8px 8px 6px 8px;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 4px;
+        color: {text};
+    }}
+    QComboBox, QPushButton, QLineEdit {{
+        background-color: {base};
+        color: {text};
+        border: 1px solid {border};
+        border-radius: 4px;
+        padding: 4px 6px;
+    }}
+    QPushButton:disabled, QLineEdit:disabled, QComboBox:disabled {{
+        color: {disabled};
+    }}
+    QComboBox::drop-down {{
+        border-left: 1px solid {border};
+        width: 18px;
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {popup};
+        color: {text};
+        selection-background-color: {highlight};
+        selection-color: #ffffff;
+    }}
+    QPushButton:hover, QComboBox:hover, QLineEdit:hover {{
+        background-color: {hover};
+    }}
+    QPushButton:pressed {{
+        background-color: {highlight};
+        color: #ffffff;
+    }}
+    QMenu {{
+        background-color: {popup};
+        color: {text};
+        border: 1px solid {border};
+    }}
+    QMenu::item:selected {{
+        background-color: {highlight};
+        color: #ffffff;
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {border};
+        margin: 4px 6px;
+    }}
+    """
 
 
-__all__ = ["apply_app_palette", "system_prefers_dark"]
+__all__ = ["apply_app_palette", "build_widget_styles", "system_prefers_dark"]
