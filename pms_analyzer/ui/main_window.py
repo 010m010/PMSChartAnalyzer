@@ -290,7 +290,7 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 12)
+        self.table_widget = QTableWidget(0, 13)
         self.table_widget.setHorizontalHeaderLabels(
             [
                 "LEVEL",
@@ -298,10 +298,11 @@ class DifficultyTab(QWidget):
                 "総NOTES数",
                 "TOTAL値",
                 "増加率",
+                "最大瞬間密度",
                 "平均密度",
+                "RMS",
                 "終端密度",
                 "終端RMS",
-                "RMS",
                 "md5",
                 "sha256",
                 "Path",
@@ -316,20 +317,23 @@ class DifficultyTab(QWidget):
         self.url_list = QComboBox()
         self.url_list.setEditable(False)
         self.metric_selector = QComboBox()
-        self.metric_selector.addItems(["総NOTES", "平均密度", "終端密度", "終端RMS", "RMS"])
+        self.metric_selector.addItems(["総NOTES", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS"])
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["散布図", "箱ひげ図"])
+        self.chart_type_selector.setCurrentIndex(1)
         self.scale_input = QLineEdit()
         self.scale_input.setPlaceholderText("縦軸の最大値を入力")
         self.scale_button = QPushButton("更新")
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
-        self.summary_metric_selector.addItems(["総NOTES", "増加率", "平均密度", "終端密度", "終端RMS", "RMS"])
+        self.summary_metric_selector.addItems(
+            ["総NOTES", "増加率", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS"]
+        )
         self.filter_button = QPushButton("絞り込み")
         self._filter_selection: set[str] = set()
         self.summary_table = QTableWidget(0, 8)
         self.summary_table.setHorizontalHeaderLabels(
-            ["LEVEL", "解析済み譜面数", "最小", "Q1", "中央値", "最大", "Q3", "平均"]
+            ["LEVEL", "解析済み譜面数", "平均", "最小", "Q1", "中央値", "Q3", "最大"]
         )
         self.summary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.songdata_label = QLabel("songdata.db: 未設定")
@@ -426,7 +430,7 @@ class DifficultyTab(QWidget):
         self.analyze_button.clicked.connect(self._analyze_table)
         self.url_list.currentTextChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
-        self.chart_type_selector.currentTextChanged.connect(self._refresh_chart_only)
+        self.chart_type_selector.currentTextChanged.connect(lambda: self._refresh_chart_only(clear_scale=True))
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
         self.scale_button.clicked.connect(self._apply_manual_scale)
         self.delete_button.clicked.connect(self._delete_saved)
@@ -543,7 +547,10 @@ class DifficultyTab(QWidget):
         else:
             self.songdata_label.setText("songdata.db: 未設定")
 
-    def _refresh_chart_only(self) -> None:
+    def _refresh_chart_only(self, *, clear_scale: bool = False) -> None:
+        if clear_scale:
+            self._manual_y_max = None
+            self.scale_input.clear()
         if not self._latest_analyses:
             return
         self._render_chart()
@@ -573,13 +580,14 @@ class DifficultyTab(QWidget):
                 total_item = QTableWidgetItem(f"{analysis.total_value:.2f}")
             self.table_widget.setItem(row, 3, total_item)
             self.table_widget.setItem(row, 4, QTableWidgetItem(rate))
-            self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.average_density:.2f}"))
-            self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.terminal_density:.2f}"))
-            self.table_widget.setItem(row, 7, QTableWidgetItem(f"{density.terminal_rms_density:.2f}"))
-            self.table_widget.setItem(row, 8, QTableWidgetItem(f"{density.rms_density:.2f}"))
-            self.table_widget.setItem(row, 9, QTableWidgetItem(analysis.md5 or ""))
-            self.table_widget.setItem(row, 10, QTableWidgetItem(analysis.sha256 or ""))
-            self.table_widget.setItem(row, 11, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
+            self.table_widget.setItem(row, 5, QTableWidgetItem(f"{density.max_density:.2f}"))
+            self.table_widget.setItem(row, 6, QTableWidgetItem(f"{density.average_density:.2f}"))
+            self.table_widget.setItem(row, 7, QTableWidgetItem(f"{density.rms_density:.2f}"))
+            self.table_widget.setItem(row, 8, QTableWidgetItem(f"{density.terminal_density:.2f}"))
+            self.table_widget.setItem(row, 9, QTableWidgetItem(f"{density.terminal_rms_density:.2f}"))
+            self.table_widget.setItem(row, 10, QTableWidgetItem(analysis.md5 or ""))
+            self.table_widget.setItem(row, 11, QTableWidgetItem(analysis.sha256 or ""))
+            self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
         self._render_chart()
         self._render_summary()
@@ -629,17 +637,21 @@ class DifficultyTab(QWidget):
         density = analysis.density
         if metric == "総NOTES":
             return float(analysis.note_count or 0)
+        if metric == "最大瞬間密度":
+            return density.max_density
+        if metric == "平均密度":
+            return density.average_density
+        if metric == "RMS":
+            return density.rms_density
         if metric == "終端密度":
             return density.terminal_density
         if metric == "終端RMS":
             return density.terminal_rms_density
-        if metric == "RMS":
-            return density.rms_density
         if metric == "増加率":
             if analysis.total_value is not None and analysis.note_count:
                 return analysis.total_value / analysis.note_count
             return None
-        return density.average_density
+        return None
 
     def _compute_y_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
         if not values:
