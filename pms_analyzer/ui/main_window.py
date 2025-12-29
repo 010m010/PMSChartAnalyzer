@@ -602,7 +602,9 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = cached
                 self._current_symbol = self._cached_symbols.get(urls[0], "")
                 self._render_table_and_chart()
+                self._reset_sorting()
                 self._sync_filter_options()
+                self._apply_filter_defaults()
 
     def _on_select_saved(self, value: str) -> None:
         if value:
@@ -610,7 +612,9 @@ class DifficultyTab(QWidget):
                 self._latest_analyses = self._cached_results[value]
                 self._current_symbol = self._cached_symbols.get(value, "")
                 self._render_table_and_chart()
+                self._reset_sorting()
                 self._sync_filter_options()
+                self._apply_filter_defaults()
 
     def _delete_saved(self) -> None:
         current = self.url_list.currentText()
@@ -646,6 +650,8 @@ class DifficultyTab(QWidget):
             self.table_widget.setSortingEnabled(False)
             header = self.table_widget.horizontalHeader()
             current_sort = (header.sortIndicatorSection(), header.sortIndicatorOrder())
+        else:
+            current_sort = None
         self.table_widget.setRowCount(len(visible))
         for row, analysis in enumerate(visible):
             entry = analysis.entry
@@ -702,11 +708,15 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
 
         self.table_widget.setSortingEnabled(sorting_state)
-        if sorting_state:
+        if sorting_state and current_sort:
             self.table_widget.sortItems(*current_sort)
+        else:
+            # Default sort by LEVEL using numeric key
+            self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
         self._render_chart()
         self._render_summary()
         self._sync_filter_options()
+        self._apply_filter_defaults()
 
     def _format_difficulty(self, value: str) -> str:
         symbol = self._current_symbol or ""
@@ -953,6 +963,11 @@ class DifficultyTab(QWidget):
             self._filter_selection = {level for level in self._filter_selection if level in available_set}
             if not self._filter_selection:
                 self._filter_selection = available_set
+
+    def _apply_filter_defaults(self) -> None:
+        # Ensure all levels are visible after load/switch
+        if self._available_levels:
+            self._filter_selection = set(self._available_levels)
 
 
 class MainWindow(QMainWindow):
