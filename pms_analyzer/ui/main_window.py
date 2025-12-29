@@ -91,6 +91,20 @@ def _quantiles(values: List[float]) -> Dict[str, float | None]:
     }
 
 
+class SortableTableWidgetItem(QTableWidgetItem):
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, QTableWidgetItem):
+            return super().__lt__(other)
+        left = self.data(Qt.ItemDataRole.UserRole)
+        right = other.data(Qt.ItemDataRole.UserRole)
+        if left is not None and right is not None:
+            try:
+                return left < right
+            except TypeError:
+                pass
+        return super().__lt__(other)
+
+
 class AnalysisWorker(QThread):
     finished = pyqtSignal(object, object)
     failed = pyqtSignal(str)
@@ -592,7 +606,6 @@ class DifficultyTab(QWidget):
         )
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_widget.setSortingEnabled(True)
-        self.table_widget.model().setSortRole(Qt.ItemDataRole.UserRole)
         header = self.table_widget.horizontalHeader()
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
@@ -874,54 +887,54 @@ class DifficultyTab(QWidget):
             if analysis.total_value is not None and analysis.note_count:
                 rate = f"{analysis.total_value / analysis.note_count:.2f}"
 
-            level_item = QTableWidgetItem(difficulty_display)
+            level_item = SortableTableWidgetItem(difficulty_display)
             level_sort_value = float(level_key[1]) if isinstance(level_key[1], (int, float)) else difficulty_display
             level_item.setData(Qt.ItemDataRole.UserRole, level_sort_value)
             self.table_widget.setItem(row, 0, level_item)
-            title_item = QTableWidgetItem(title_text)
+            title_item = SortableTableWidgetItem(title_text)
             title_item.setData(Qt.ItemDataRole.UserRole, title_text)
             if not analysis.resolved_path:
                 title_item.setForeground(QColor("red"))
                 title_item.setText(f"{title_text}（未解析）")
             self.table_widget.setItem(row, 1, title_item)
-            notes_item = QTableWidgetItem(str(analysis.note_count or 0))
+            notes_item = SortableTableWidgetItem(str(analysis.note_count or 0))
             notes_item.setData(Qt.ItemDataRole.UserRole, float(analysis.note_count or 0))
             self.table_widget.setItem(row, 2, notes_item)
             if analysis.total_value is None:
-                total_item = QTableWidgetItem("未定義")
+                total_item = SortableTableWidgetItem("未定義")
                 total_item.setForeground(QColor("red"))
                 total_item.setData(Qt.ItemDataRole.UserRole, float("-inf"))
             else:
-                total_item = QTableWidgetItem(f"{analysis.total_value:.2f}")
+                total_item = SortableTableWidgetItem(f"{analysis.total_value:.2f}")
                 total_item.setData(Qt.ItemDataRole.UserRole, float(analysis.total_value))
             self.table_widget.setItem(row, 3, total_item)
-            rate_item = QTableWidgetItem(rate)
+            rate_item = SortableTableWidgetItem(rate)
             rate_value = float(rate) if rate != "-" else float("-inf")
             rate_item.setData(Qt.ItemDataRole.UserRole, rate_value)
             self.table_widget.setItem(row, 4, rate_item)
-            max_item = QTableWidgetItem(f"{density.max_density:.2f}")
+            max_item = SortableTableWidgetItem(f"{density.max_density:.2f}")
             max_item.setData(Qt.ItemDataRole.UserRole, float(density.max_density))
             self.table_widget.setItem(row, 5, max_item)
-            avg_item = QTableWidgetItem(f"{density.average_density:.2f}")
+            avg_item = SortableTableWidgetItem(f"{density.average_density:.2f}")
             avg_item.setData(Qt.ItemDataRole.UserRole, float(density.average_density))
             self.table_widget.setItem(row, 6, avg_item)
-            rms_item = QTableWidgetItem(f"{density.rms_density:.2f}")
+            rms_item = SortableTableWidgetItem(f"{density.rms_density:.2f}")
             rms_item.setData(Qt.ItemDataRole.UserRole, float(density.rms_density))
             self.table_widget.setItem(row, 7, rms_item)
-            term_item = QTableWidgetItem(f"{density.terminal_density:.2f}")
+            term_item = SortableTableWidgetItem(f"{density.terminal_density:.2f}")
             term_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_density))
             self.table_widget.setItem(row, 8, term_item)
-            term_rms_item = QTableWidgetItem(f"{density.terminal_rms_density:.2f}")
+            term_rms_item = SortableTableWidgetItem(f"{density.terminal_rms_density:.2f}")
             term_rms_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_rms_density))
             self.table_widget.setItem(row, 9, term_rms_item)
-            md5_item = QTableWidgetItem(analysis.md5 or "")
+            md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
             self.table_widget.setItem(row, 10, md5_item)
-            sha_item = QTableWidgetItem(analysis.sha256 or "")
+            sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
             self.table_widget.setItem(row, 11, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
-            path_item = QTableWidgetItem(path_text)
+            path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
             self.table_widget.setItem(row, 12, path_item)
 
