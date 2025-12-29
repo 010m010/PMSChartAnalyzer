@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QRadioButton,
     QButtonGroup,
+    QMenu,
 )
 import requests
 
@@ -309,6 +310,8 @@ class DifficultyTab(QWidget):
             ]
         )
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_widget.setSortingEnabled(True)
+        self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.load_button = QPushButton("読み込む")
         self.analyze_button = QPushButton("更新")
         self.delete_button = QPushButton("削除")
@@ -435,6 +438,7 @@ class DifficultyTab(QWidget):
         self.scale_button.clicked.connect(self._apply_manual_scale)
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
+        self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -711,7 +715,7 @@ class DifficultyTab(QWidget):
                 count_item.setForeground(QColor("red"))
             self.summary_table.setItem(idx, 1, count_item)
             stats = _quantiles(values)
-            labels = [stats["min"], stats["q1"], stats["median"], stats["max"], stats["q3"], stats["mean"]]
+            labels = [stats["mean"], stats["min"], stats["q1"], stats["median"], stats["q3"], stats["max"]]
             for col, val in enumerate(labels, start=2):
                 text = "-" if val is None else f"{val:.2f}"
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
@@ -795,6 +799,32 @@ class DifficultyTab(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._filter_selection = {cb.text() for cb in checkboxes if cb.isChecked()}
             self._render_table_and_chart()
+
+    def _show_table_context_menu(self, pos) -> None:
+        item = self.table_widget.itemAt(pos)
+        if item is None:
+            return
+        row = item.row()
+        title_item = self.table_widget.item(row, 1)
+        path_item = self.table_widget.item(row, 12)
+        if path_item is None or not path_item.text():
+            return
+        path = Path(path_item.text())
+        title = title_item.text() if title_item else str(path)
+
+        menu = QMenu(self.table_widget)
+        action = QAction(f"{title} の譜面情報を見る", self.table_widget)
+        menu.addAction(action)
+
+        def open_chart() -> None:
+            if not path.exists():
+                QMessageBox.warning(self, "ファイルなし", f"譜面ファイルが見つかりません: {path}")
+                return
+            self.tabs.setCurrentWidget(self.single_tab)
+            self.single_tab.load_file(path)
+
+        action.triggered.connect(open_chart)
+        menu.exec(self.table_widget.viewport().mapToGlobal(pos))
 
     def _is_difficulty_visible(self, difficulty: str) -> bool:
         if not self._filter_selection:
@@ -914,6 +944,7 @@ class MainWindow(QMainWindow):
         if urls:
             path = Path(urls[0].toLocalFile())
             if path.suffix.lower() in {".pms", ".bms"}:
+                self.tabs.setCurrentWidget(self.single_tab)
                 self.single_tab.load_file(path)
             else:
                 QMessageBox.warning(self, "不正な形式", ".pms または .bms ファイルを指定してください")
