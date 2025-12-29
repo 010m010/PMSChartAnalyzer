@@ -64,6 +64,38 @@ from ..storage import (
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 
 
+def _metric_color(metric_key: str, value: float | None) -> QColor | None:
+    if value is None:
+        return None
+    if metric_key == "terminal_difficulty":
+        if value > 0.5:
+            return QColor("#cc2f2f")
+        if value > 0.2:
+            return QColor("#e67a73")
+        if value < -0.5:
+            return QColor("#2f6bcc")
+        if value < -0.2:
+            return QColor("#74a2e6")
+        return None
+    if metric_key == "overall_difficulty":
+        if value >= 1.0:
+            return QColor("#cc2f2f")
+        if value >= 0.7:
+            return QColor("#e67a73")
+        if value >= 0.3:
+            return QColor("#f2b8b5")
+        return None
+    if metric_key == "gustiness":
+        if value >= 3.0:
+            return QColor("#cc2f2f")
+        if value >= 2.0:
+            return QColor("#e67a73")
+        if value >= 1.0:
+            return QColor("#f2b8b5")
+        return None
+    return None
+
+
 def _mean(values: List[float | int]) -> float:
     return mean(values) if values else 0.0
 
@@ -271,11 +303,14 @@ class SingleAnalysisTab(QWidget):
         metrics_group = QGroupBox("密度メトリクス")
         grid = QGridLayout()
         labels = {
-            "max_density": "秒間密度(最大)",
-            "terminal_density": "終端密度(クリアゲージ基準)",
-            "terminal_rms_density": "終端RMS(クリアゲージ基準)",
-            "average_density": "平均密度(全体)",
+            "max_density": "秒間最大密度",
+            "average_density": "平均密度",
             "rms_density": "RMS",
+            "terminal_density": "終端密度",
+            "terminal_rms_density": "終端RMS",
+            "overall_difficulty": "全体難度数",
+            "terminal_difficulty": "終端難度数",
+            "gustiness": "突風度数",
         }
         for row, (key, title) in enumerate(labels.items()):
             lbl = QLabel(title)
@@ -353,6 +388,17 @@ class SingleAnalysisTab(QWidget):
         label.setText(text)
         label.setToolTip(text)
 
+    def _apply_metric_label_colors(self, density: DensityResult) -> None:
+        for key in ("overall_difficulty", "terminal_difficulty", "gustiness"):
+            label = self.metrics_labels.get(key)
+            if not label:
+                continue
+            color = _metric_color(key, getattr(density, key, None))
+            if color:
+                label.setStyleSheet(f"color: {color.name()}")
+            else:
+                label.setStyleSheet("")
+
     def set_theme_mode(self, mode: str) -> None:
         self.chart.set_theme_mode(mode)
         self.chart.draw()
@@ -392,6 +438,9 @@ class SingleAnalysisTab(QWidget):
                 "terminal_density": density.terminal_density,
                 "terminal_rms_density": density.terminal_rms_density,
                 "rms_density": density.rms_density,
+                "overall_difficulty": density.overall_difficulty,
+                "terminal_difficulty": density.terminal_difficulty,
+                "gustiness": density.gustiness,
             },
         )
         append_history(record)
@@ -409,12 +458,16 @@ class SingleAnalysisTab(QWidget):
 
     def _update_metrics(self, density: DensityResult) -> None:
         self._set_label_text(self.metrics_labels["max_density"], f"{density.max_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["terminal_density"], f"{density.terminal_density:.2f} note/s")
         self._set_label_text(
             self.metrics_labels["terminal_rms_density"], f"{density.terminal_rms_density:.2f} note/s"
         )
-        self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
-        self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["overall_difficulty"], f"{density.overall_difficulty:.2f}")
+        self._set_label_text(self.metrics_labels["terminal_difficulty"], f"{density.terminal_difficulty:.2f}")
+        self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
+        self._apply_metric_label_colors(density)
         self._reset_range_metrics()
 
     def _refresh_single_chart(self) -> None:
@@ -643,7 +696,7 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 13)
+        self.table_widget = QTableWidget(0, 16)
         self.table_widget.setHorizontalHeaderLabels(
             [
                 "LEVEL",
@@ -656,6 +709,9 @@ class DifficultyTab(QWidget):
                 "RMS",
                 "終端密度",
                 "終端RMS",
+                "全体難度数",
+                "終端難度数",
+                "突風度数",
                 "md5",
                 "sha256",
                 "Path",
@@ -679,7 +735,9 @@ class DifficultyTab(QWidget):
         self.url_list = QComboBox()
         self.url_list.setEditable(False)
         self.metric_selector = QComboBox()
-        self.metric_selector.addItems(["総NOTES", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS"])
+        self.metric_selector.addItems(
+            ["総NOTES", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS", "全体難度数", "終端難度数", "突風度数"]
+        )
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["箱ひげ図", "散布図"])
         self.scale_min_input = QLineEdit()
@@ -692,7 +750,18 @@ class DifficultyTab(QWidget):
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(
-            ["総NOTES", "増加率", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS"]
+            [
+                "総NOTES",
+                "増加率",
+                "最大瞬間密度",
+                "平均密度",
+                "RMS",
+                "終端密度",
+                "終端RMS",
+                "全体難度数",
+                "終端難度数",
+                "突風度数",
+            ]
         )
         self.filter_button = QPushButton("絞り込み")
         self._filter_selection: set[str] = set()
@@ -1021,16 +1090,28 @@ class DifficultyTab(QWidget):
             term_rms_item = SortableTableWidgetItem(f"{density.terminal_rms_density:.2f}")
             term_rms_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_rms_density))
             self.table_widget.setItem(row, 9, term_rms_item)
+            overall_item = SortableTableWidgetItem(f"{density.overall_difficulty:.2f}")
+            overall_item.setData(Qt.ItemDataRole.UserRole, float(density.overall_difficulty))
+            self._apply_metric_item_color(overall_item, "overall_difficulty", density.overall_difficulty)
+            self.table_widget.setItem(row, 10, overall_item)
+            terminal_diff_item = SortableTableWidgetItem(f"{density.terminal_difficulty:.2f}")
+            terminal_diff_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_difficulty))
+            self._apply_metric_item_color(terminal_diff_item, "terminal_difficulty", density.terminal_difficulty)
+            self.table_widget.setItem(row, 11, terminal_diff_item)
+            gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
+            gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
+            self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
+            self.table_widget.setItem(row, 12, gust_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 10, md5_item)
+            self.table_widget.setItem(row, 13, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 11, sha_item)
+            self.table_widget.setItem(row, 14, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 12, path_item)
+            self.table_widget.setItem(row, 15, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1136,11 +1217,22 @@ class DifficultyTab(QWidget):
             return density.terminal_density
         if metric == "終端RMS":
             return density.terminal_rms_density
+        if metric == "全体難度数":
+            return density.overall_difficulty
+        if metric == "終端難度数":
+            return density.terminal_difficulty
+        if metric == "突風度数":
+            return density.gustiness
         if metric == "増加率":
             if analysis.total_value is not None and analysis.note_count:
                 return analysis.total_value / analysis.note_count
             return None
         return None
+
+    def _apply_metric_item_color(self, item: QTableWidgetItem, metric_key: str, value: float | None) -> None:
+        color = _metric_color(metric_key, value)
+        if color:
+            item.setForeground(color)
 
     def _overlay_value_for_metric(self, metric: str) -> float | None:
         if not self._single_overlay_density:
@@ -1158,6 +1250,12 @@ class DifficultyTab(QWidget):
             return density.terminal_density
         if metric == "終端RMS":
             return density.terminal_rms_density
+        if metric == "全体難度数":
+            return density.overall_difficulty
+        if metric == "終端難度数":
+            return density.terminal_difficulty
+        if metric == "突風度数":
+            return density.gustiness
         if metric == "増加率":
             if self._single_overlay_total_value is not None and self._single_overlay_note_count:
                 return self._single_overlay_total_value / self._single_overlay_note_count

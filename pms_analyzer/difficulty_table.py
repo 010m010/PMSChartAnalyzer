@@ -94,7 +94,9 @@ def analyze_table(
         resolved_path = _resolve_entry_path(entry, songdata_db=songdata_db, beatoraja_base=beatoraja_base)
 
         if resolved_path is None:
-            density = DensityResult([], [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None)
+            density = DensityResult(
+                [], [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0, 0.0, 0.0
+            )
             analyses.append(
                 ChartAnalysis(
                     difficulty=entry.difficulty,
