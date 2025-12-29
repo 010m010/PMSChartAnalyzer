@@ -66,3 +66,19 @@ def test_skipped_measures_accumulate_time(tmp_path: Path) -> None:
     # Two measures with BPM 120 => ~2 seconds per measure, so skipping #001 should advance time
     # Last note is in measure 2 (0-indexed 002), so expect roughly 4 seconds total
     assert result.total_time >= 3.5
+
+
+def test_mine_channels_are_ignored(tmp_path: Path) -> None:
+    content = """
+#BPM 120
+#00011:0100
+#00016:0001
+    """.strip()
+    file_path = tmp_path / "mine.pms"
+    file_path.write_text(content, encoding="utf-8")
+
+    parser = PMSParser()
+    result = parser.parse(file_path)
+
+    # Channel 16 is a mine; only the playable note on channel 11 should be counted
+    assert len(result.notes) == 1

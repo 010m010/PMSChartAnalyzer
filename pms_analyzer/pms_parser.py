@@ -23,6 +23,9 @@ def _build_key_channels() -> Dict[int, int]:
 
 
 KEY_CHANNELS: Dict[int, int] = _build_key_channels()
+# Channels used for mines or invisible notes should be excluded from density counts.
+# Common BMS/PMS mine channels mirror key channels with the "6" suffix.
+MINE_CHANNELS: set[int] = {16, 26, 36, 46, 56, 66, 76, 86}
 
 
 @dataclass
@@ -190,6 +193,8 @@ class PMSParser:
                     continue
                 position = idx / slots
 
+                if channel in MINE_CHANNELS:
+                    continue
                 if channel in KEY_CHANNELS:
                     events.append((position, "note", KEY_CHANNELS[channel]))
                 elif channel == 8:
