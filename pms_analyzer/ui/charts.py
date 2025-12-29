@@ -31,6 +31,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._bar_colors: list[str] = []
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
+        self._x_limits: tuple[float, float] | None = None
         self._span_selector = SpanSelector(
             self.ax,
             self._on_span_select,
@@ -80,6 +81,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         total_time: float | None = None,
         terminal_window: float | None = None,
         y_max: float | None = None,
+        show_smoothed_line: bool = True,
     ) -> None:
         self.ax.clear()
         self._clear_selection()
@@ -117,7 +119,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 fontsize=9,
             )
         smoothed = self._smooth_density_wave(totals)
-        if smoothed:
+        if show_smoothed_line and smoothed:
             line_color = "#007ACC" if not dark else "#7CC7FF"
             self.ax.plot(
                 x,
@@ -129,6 +131,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
             )
         if y_max:
             self.ax.set_ylim(top=y_max)
+        self._set_x_limits(len(per_second_by_key))
         self.figure.tight_layout()
         self.draw()
 
@@ -168,6 +171,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         end_edge = end_bin - 0.5
         self._selection_artist = self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
         self._apply_bar_highlight(start_bin, end_bin)
+        self._restore_x_limits()
         self.draw_idle()
 
     def _clear_selection(self) -> None:
@@ -186,6 +190,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if self._bars:
             for patch, color in zip(self._bars, self._bar_colors):
                 patch.set_color(color)
+        self._restore_x_limits()
         self.draw_idle()
 
     def _apply_bar_highlight(self, start_bin: int, end_bin: int) -> None:
@@ -235,6 +240,19 @@ class StackedDensityChart(FigureCanvasQTAgg):
             coeffs = np.polyfit(x, segment, polyorder)
             smoothed[idx] = np.polyval(coeffs, 0.0)
         return smoothed
+
+    def _set_x_limits(self, num_bins: int) -> None:
+        if num_bins <= 0:
+            self._x_limits = (-0.5, 0.5)
+        else:
+            self._x_limits = (-0.5, num_bins - 0.5)
+        self.ax.set_xlim(self._x_limits)
+        self.ax.set_autoscalex_on(False)
+
+    def _restore_x_limits(self) -> None:
+        if self._x_limits:
+            self.ax.set_xlim(self._x_limits)
+            self.ax.set_autoscalex_on(False)
 
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
