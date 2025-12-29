@@ -174,20 +174,26 @@ class SingleAnalysisTab(QWidget):
 
     def _build_ui(self) -> None:
         main_layout = QVBoxLayout()
+
+        file_layout = QHBoxLayout()
+        file_layout.addWidget(self.analyze_button)
+        file_layout.addWidget(QLabel("選択ファイル:"))
+        self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.file_label.setMinimumWidth(200)
+        file_layout.addWidget(self.file_label, 1)
+        main_layout.addLayout(file_layout)
+
         chart_container = QWidget()
         chart_layout = QVBoxLayout()
         chart_layout.setContentsMargins(0, 0, 0, 0)
         chart_layout.addWidget(self.chart)
 
-        info_layout = QHBoxLayout()
-        info_layout.addWidget(self.analyze_button)
-        info_layout.addWidget(QLabel("選択ファイル:"))
-        self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.file_label.setMinimumWidth(200)
-        info_layout.addWidget(self.file_label, 1)
-        info_layout.addWidget(self.scale_input)
-        info_layout.addWidget(self.scale_button)
-        chart_layout.addLayout(info_layout)
+        scale_layout = QHBoxLayout()
+        scale_layout.addStretch()
+        scale_layout.addWidget(QLabel("縦軸の最大値:"))
+        scale_layout.addWidget(self.scale_input)
+        scale_layout.addWidget(self.scale_button)
+        chart_layout.addLayout(scale_layout)
         chart_container.setLayout(chart_layout)
 
         info_group = QGroupBox("基本情報")
@@ -212,7 +218,9 @@ class SingleAnalysisTab(QWidget):
             value_label = QLabel("-")
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setFixedWidth(200)
+            value_label.setWordWrap(False)
+            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value_label.setToolTip("-")
             self.info_labels[key] = value_label
             info_grid.addWidget(value_label, row, 1)
         info_grid.setHorizontalSpacing(6)
@@ -221,7 +229,6 @@ class SingleAnalysisTab(QWidget):
         info_grid.setColumnStretch(0, 0)
         info_grid.setColumnStretch(1, 0)
         info_group.setLayout(info_grid)
-        main_layout.addWidget(info_group)
 
         metrics_group = QGroupBox("密度メトリクス")
         grid = QGridLayout()
@@ -255,7 +262,9 @@ class SingleAnalysisTab(QWidget):
                 grid.addWidget(lbl, row, 0)
             value_label = QLabel("-")
             value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setFixedWidth(150)
+            value_label.setWordWrap(False)
+            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value_label.setToolTip("-")
             self.metrics_labels[key] = value_label
             grid.addWidget(value_label, row, 1)
         grid.setHorizontalSpacing(6)
@@ -280,7 +289,9 @@ class SingleAnalysisTab(QWidget):
             range_grid.addWidget(lbl, row, 0)
             value_label = QLabel("-")
             value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setFixedWidth(150)
+            value_label.setWordWrap(False)
+            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value_label.setToolTip("-")
             self.range_labels[key] = value_label
             range_grid.addWidget(value_label, row, 1)
         range_grid.setHorizontalSpacing(6)
@@ -290,30 +301,26 @@ class SingleAnalysisTab(QWidget):
         range_grid.setColumnStretch(1, 0)
         range_group.setLayout(range_grid)
 
-        details_container = QWidget()
-        details_layout = QVBoxLayout()
-        details_layout.setContentsMargins(0, 0, 0, 0)
-        details_layout.addWidget(info_group)
-        details_layout.addWidget(metrics_group)
-        details_layout.addWidget(range_group)
-        details_layout.addWidget(self.status_label)
-        details_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-        details_container.setLayout(details_layout)
+        details_layout = QHBoxLayout()
+        details_layout.addWidget(info_group, 2)
+        details_layout.addWidget(metrics_group, 1)
+        details_layout.addWidget(range_group, 1)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(chart_container)
-        splitter.addWidget(details_container)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(chart_container, 3)
+        main_layout.addLayout(details_layout)
+        main_layout.addWidget(self.status_label)
+        main_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
         self.setLayout(main_layout)
 
+        self._set_label_text(self.file_label, self.file_label.text())
         self.analyze_button.clicked.connect(self._open_file_dialog)
         self.scale_button.clicked.connect(self._apply_single_scale)
         self.chart.set_selection_callback(self._on_range_selected)
         self._reset_range_metrics()
+
+    def _set_label_text(self, label: QLabel, text: str) -> None:
+        label.setText(text)
+        label.setToolTip(text)
 
     def set_theme_mode(self, mode: str) -> None:
         self.chart.set_theme_mode(mode)
@@ -326,7 +333,7 @@ class SingleAnalysisTab(QWidget):
 
     def load_file(self, path: Path) -> None:
         self._current_path = path
-        self.file_label.setText(str(path))
+        self._set_label_text(self.file_label, str(path))
         self.status_label.setText("解析中...")
         self._reset_range_metrics()
         self.chart.clear_selection()
@@ -371,11 +378,13 @@ class SingleAnalysisTab(QWidget):
         QMessageBox.critical(self, "エラー", error_message)
 
     def _update_metrics(self, density: DensityResult) -> None:
-        self.metrics_labels["max_density"].setText(f"{density.max_density:.2f} note/s")
-        self.metrics_labels["terminal_density"].setText(f"{density.terminal_density:.2f} note/s")
-        self.metrics_labels["terminal_rms_density"].setText(f"{density.terminal_rms_density:.2f} note/s")
-        self.metrics_labels["average_density"].setText(f"{density.average_density:.2f} note/s")
-        self.metrics_labels["rms_density"].setText(f"{density.rms_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["max_density"], f"{density.max_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["terminal_density"], f"{density.terminal_density:.2f} note/s")
+        self._set_label_text(
+            self.metrics_labels["terminal_rms_density"], f"{density.terminal_rms_density:.2f} note/s"
+        )
+        self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
         self._reset_range_metrics()
 
     def _apply_single_scale(self) -> None:
@@ -407,7 +416,7 @@ class SingleAnalysisTab(QWidget):
             label = self.info_labels.get(key)
             if not label:
                 return
-            label.setText(text)
+            self._set_label_text(label, text)
             if color:
                 label.setStyleSheet(f"color: {color};")
             else:
@@ -462,7 +471,7 @@ class SingleAnalysisTab(QWidget):
         for key, default in defaults.items():
             label = self.range_labels.get(key)
             if label:
-                label.setText(default)
+                self._set_label_text(label, default)
 
     def _on_range_selected(self, start: float, end: float) -> None:
         if not self._latest_single_parse or not self._latest_single_density:
@@ -480,7 +489,7 @@ class SingleAnalysisTab(QWidget):
         if end_clamped <= start_clamped:
             self._reset_range_metrics()
             if "range_span" in self.range_labels:
-                self.range_labels["range_span"].setText(f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+                self._set_label_text(self.range_labels["range_span"], f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
             return
 
         first_note_time = parse_result.notes[0].time if parse_result.notes else 0.0
@@ -498,16 +507,16 @@ class SingleAnalysisTab(QWidget):
         rms = self._compute_range_rms(density.per_second_total, bin_size, start_clamped, end_clamped)
 
         if "range_span" in self.range_labels:
-            self.range_labels["range_span"].setText(f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+            self._set_label_text(self.range_labels["range_span"], f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
         if "range_notes" in self.range_labels:
-            self.range_labels["range_notes"].setText(str(note_count))
+            self._set_label_text(self.range_labels["range_notes"], str(note_count))
         if "range_gauge" in self.range_labels:
             gauge_text = "未定義" if gauge_increase is None else f"{gauge_increase:.2f}"
-            self.range_labels["range_gauge"].setText(gauge_text)
+            self._set_label_text(self.range_labels["range_gauge"], gauge_text)
         if "range_avg" in self.range_labels:
-            self.range_labels["range_avg"].setText(f"{avg_density:.2f} note/s")
+            self._set_label_text(self.range_labels["range_avg"], f"{avg_density:.2f} note/s")
         if "range_rms" in self.range_labels:
-            self.range_labels["range_rms"].setText(f"{rms:.2f} note/s")
+            self._set_label_text(self.range_labels["range_rms"], f"{rms:.2f} note/s")
 
     def _compute_range_rms(self, per_second: List[int], bin_size: float, start: float, end: float) -> float:
         if end <= start or not per_second or bin_size <= 0:
