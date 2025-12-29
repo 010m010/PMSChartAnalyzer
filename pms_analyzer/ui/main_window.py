@@ -578,6 +578,14 @@ class DifficultyTab(QWidget):
         )
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_widget.setSortingEnabled(True)
+        self.table_widget.model().setSortRole(Qt.ItemDataRole.UserRole)
+        header = self.table_widget.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        header.setStyleSheet(
+            "QHeaderView::down-arrow {image: url(:/qt-project.org/styles/commonstyle/images/up_arrow.png);} "
+            "QHeaderView::up-arrow {image: url(:/qt-project.org/styles/commonstyle/images/down_arrow.png);}"
+        )
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.load_button = QPushButton("読み込む")
         self.analyze_button = QPushButton("更新")
@@ -640,19 +648,6 @@ class DifficultyTab(QWidget):
         layout.addWidget(self.loading_label)
         layout.addWidget(self.songdata_label)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setChildrenCollapsible(False)
-
-        table_container = QWidget()
-        table_layout = QVBoxLayout()
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.addWidget(self.table_widget)
-        table_container.setLayout(table_layout)
-
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(self.filter_button)
-        filter_layout.addStretch()
-
         chart_container = QWidget()
         chart_layout = QVBoxLayout()
         chart_layout.setContentsMargins(0, 0, 0, 0)
@@ -674,7 +669,22 @@ class DifficultyTab(QWidget):
         chart_area_layout.addWidget(self.box_chart)
         chart_area.setLayout(chart_area_layout)
 
-        summary_container = QWidget()
+        chart_layout.addWidget(chart_area)
+        chart_container.setLayout(chart_layout)
+
+        table_tabs = QTabWidget()
+
+        table_tab = QWidget()
+        table_tab_layout = QVBoxLayout()
+        table_tab_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(self.filter_button)
+        filter_layout.addStretch()
+        table_tab_layout.addLayout(filter_layout)
+        table_tab_layout.addWidget(self.table_widget)
+        table_tab.setLayout(table_tab_layout)
+
+        summary_tab = QWidget()
         summary_layout = QVBoxLayout()
         summary_layout.setContentsMargins(0, 0, 0, 0)
         summary_header = QHBoxLayout()
@@ -684,20 +694,13 @@ class DifficultyTab(QWidget):
         summary_header.addWidget(self.summary_metric_selector)
         summary_layout.addLayout(summary_header)
         summary_layout.addWidget(self.summary_table)
-        summary_container.setLayout(summary_layout)
+        summary_tab.setLayout(summary_layout)
 
-        chart_splitter = QSplitter(Qt.Orientation.Vertical)
-        chart_splitter.setChildrenCollapsible(False)
-        chart_splitter.addWidget(chart_area)
-        chart_splitter.addWidget(summary_container)
+        table_tabs.addTab(table_tab, "譜面一覧")
+        table_tabs.addTab(summary_tab, "難易度統計")
 
-        chart_layout.addWidget(chart_splitter)
-        chart_container.setLayout(chart_layout)
-
-        splitter.addWidget(table_container)
-        splitter.addWidget(chart_container)
-        layout.addLayout(filter_layout)
-        layout.addWidget(splitter)
+        layout.addWidget(chart_container)
+        layout.addWidget(table_tabs)
         self.setLayout(layout)
 
         self.load_button.clicked.connect(self._select_table)
@@ -858,10 +861,11 @@ class DifficultyTab(QWidget):
                 rate = f"{analysis.total_value / analysis.note_count:.2f}"
 
             level_item = QTableWidgetItem(difficulty_display)
-            if isinstance(level_key[1], (int, float)):
-                level_item.setData(Qt.ItemDataRole.UserRole, float(level_key[1]))
+            level_sort_value = float(level_key[1]) if isinstance(level_key[1], (int, float)) else difficulty_display
+            level_item.setData(Qt.ItemDataRole.UserRole, level_sort_value)
             self.table_widget.setItem(row, 0, level_item)
             title_item = QTableWidgetItem(title_text)
+            title_item.setData(Qt.ItemDataRole.UserRole, title_text)
             if not analysis.resolved_path:
                 title_item.setForeground(QColor("red"))
                 title_item.setText(f"{title_text}（未解析）")
@@ -872,13 +876,14 @@ class DifficultyTab(QWidget):
             if analysis.total_value is None:
                 total_item = QTableWidgetItem("未定義")
                 total_item.setForeground(QColor("red"))
+                total_item.setData(Qt.ItemDataRole.UserRole, float("-inf"))
             else:
                 total_item = QTableWidgetItem(f"{analysis.total_value:.2f}")
                 total_item.setData(Qt.ItemDataRole.UserRole, float(analysis.total_value))
             self.table_widget.setItem(row, 3, total_item)
             rate_item = QTableWidgetItem(rate)
-            if rate != "-":
-                rate_item.setData(Qt.ItemDataRole.UserRole, float(rate))
+            rate_value = float(rate) if rate != "-" else float("-inf")
+            rate_item.setData(Qt.ItemDataRole.UserRole, rate_value)
             self.table_widget.setItem(row, 4, rate_item)
             max_item = QTableWidgetItem(f"{density.max_density:.2f}")
             max_item.setData(Qt.ItemDataRole.UserRole, float(density.max_density))
@@ -895,9 +900,16 @@ class DifficultyTab(QWidget):
             term_rms_item = QTableWidgetItem(f"{density.terminal_rms_density:.2f}")
             term_rms_item.setData(Qt.ItemDataRole.UserRole, float(density.terminal_rms_density))
             self.table_widget.setItem(row, 9, term_rms_item)
-            self.table_widget.setItem(row, 10, QTableWidgetItem(analysis.md5 or ""))
-            self.table_widget.setItem(row, 11, QTableWidgetItem(analysis.sha256 or ""))
-            self.table_widget.setItem(row, 12, QTableWidgetItem(str(analysis.resolved_path) if analysis.resolved_path else ""))
+            md5_item = QTableWidgetItem(analysis.md5 or "")
+            md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
+            self.table_widget.setItem(row, 10, md5_item)
+            sha_item = QTableWidgetItem(analysis.sha256 or "")
+            sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
+            self.table_widget.setItem(row, 11, sha_item)
+            path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
+            path_item = QTableWidgetItem(path_text)
+            path_item.setData(Qt.ItemDataRole.UserRole, path_text)
+            self.table_widget.setItem(row, 12, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
