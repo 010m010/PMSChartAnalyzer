@@ -8,20 +8,12 @@ from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 from PyQt6.QtGui import QPalette, QGuiApplication
 
+from ..theme import system_prefers_dark
+
 # Prefer Windows-installed Meiryo to avoid missing font warnings; fall back to common JP fonts.
 rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 
 matplotlib.use("Agg")
-
-def _system_prefers_dark() -> bool:
-    try:
-        scheme = QGuiApplication.styleHints().colorScheme()  # type: ignore[attr-defined]
-        return getattr(QPalette.ColorScheme, "Dark", None) == scheme
-    except Exception:
-        palette = QGuiApplication.palette()
-        window_color = palette.color(QPalette.ColorRole.Window)
-        return window_color.lightness() < 128
-    return False
 
 class StackedDensityChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -38,7 +30,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         if self.theme_mode == "light":
             return False
         if QGuiApplication.instance():
-            return _system_prefers_dark()
+            return system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
@@ -107,7 +99,7 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         if self.theme_mode == "light":
             return False
         if QGuiApplication.instance():
-            return _system_prefers_dark()
+            return system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128
@@ -184,7 +176,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         if self.theme_mode == "light":
             return False
         if QGuiApplication.instance():
-            return _system_prefers_dark()
+            return system_prefers_dark()
         palette = self.palette()
         window_color = palette.color(QPalette.ColorRole.Window)
         return window_color.lightness() < 128

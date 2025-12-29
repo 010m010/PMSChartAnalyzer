@@ -806,7 +806,7 @@ class MainWindow(QMainWindow):
         set_path_action = QAction("songdata.db パスを指定", self)
         set_path_action.triggered.connect(self._select_songdata_path)
         settings_menu.addAction(set_path_action)
-        theme_menu = settings_menu.addMenu("カラーモード")
+        theme_menu = settings_menu.addMenu("テーマ")
         self.theme_action_group = QActionGroup(self)
         themes = [("システム設定に合わせる", "system"), ("ライトモード", "light"), ("ダークモード", "dark")]
         for label, value in themes:
