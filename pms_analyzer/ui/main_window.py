@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
 import requests
 
 from ..analysis import DensityResult, compute_density
+from ..range_stats import calculate_range_selection_stats
 from ..difficulty_table import (
     ChartAnalysis,
     DifficultyTable,
@@ -504,33 +505,34 @@ class SingleAnalysisTab(QWidget):
             gauge_rate = parse_result.total_value / len(parse_result.notes)
             gauge_increase = gauge_rate * note_count
 
-        rms = self._compute_range_rms(density.per_second_total, bin_size, start_clamped, end_clamped)
+        stats = calculate_range_selection_stats(
+            density.per_second_total,
+            density.duration,
+            parse_result.notes,
+            parse_result.total_value,
+            start,
+            end,
+            bin_size=bin_size,
+        )
+
+        if not stats:
+            self._reset_range_metrics()
+            return
 
         if "range_span" in self.range_labels:
-            self._set_label_text(self.range_labels["range_span"], f"{start_clamped:.2f}～{end_clamped:.2f} 秒")
+            self._set_label_text(
+                self.range_labels["range_span"],
+                f"{stats.start_seconds:.2f}～{stats.end_seconds:.2f} 秒",
+            )
         if "range_notes" in self.range_labels:
-            self._set_label_text(self.range_labels["range_notes"], str(note_count))
+            self._set_label_text(self.range_labels["range_notes"], str(stats.note_count))
         if "range_gauge" in self.range_labels:
-            gauge_text = "未定義" if gauge_increase is None else f"{gauge_increase:.2f}"
+            gauge_text = "未定義" if stats.gauge_increase is None else f"{stats.gauge_increase:.2f}"
             self._set_label_text(self.range_labels["range_gauge"], gauge_text)
         if "range_avg" in self.range_labels:
-            self._set_label_text(self.range_labels["range_avg"], f"{avg_density:.2f} note/s")
+            self._set_label_text(self.range_labels["range_avg"], f"{stats.average_density:.2f} note/s")
         if "range_rms" in self.range_labels:
-            self._set_label_text(self.range_labels["range_rms"], f"{rms:.2f} note/s")
-
-    def _compute_range_rms(self, per_second: List[int], bin_size: float, start: float, end: float) -> float:
-        if end <= start or not per_second or bin_size <= 0:
-            return 0.0
-        total_duration = end - start
-        weighted_sum = 0.0
-        for idx, val in enumerate(per_second):
-            bin_start = idx * bin_size
-            bin_end = bin_start + bin_size
-            overlap = max(0.0, min(bin_end, end) - max(bin_start, start))
-            if overlap <= 0:
-                continue
-            weighted_sum += (val * val) * overlap
-        return (weighted_sum / total_duration) ** 0.5 if total_duration > 0 else 0.0
+            self._set_label_text(self.range_labels["range_rms"], f"{stats.rms_density:.2f} note/s")
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():

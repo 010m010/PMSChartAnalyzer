@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from pms_analyzer.analysis import compute_density
+from pms_analyzer.range_stats import calculate_range_selection_stats
 from pms_analyzer.pms_parser import PMSParser
 
 
@@ -31,6 +32,18 @@ def test_parse_and_density(tmp_path: Path) -> None:
     assert density.terminal_density >= 0
     assert density.terminal_rms_density >= 0
     assert density.rms_density > 0
+
+    stats = calculate_range_selection_stats(
+        density.per_second_total,
+        density.duration,
+        result.notes,
+        result.total_value,
+        0,
+        len(density.per_second_total),
+    )
+    assert stats is not None
+    assert stats.note_count == len(result.notes)
+    assert stats.gauge_increase is None or abs(stats.gauge_increase - (result.total_value or 0)) < 1e-6
 
 
 def test_hex_bpm_parsing(tmp_path: Path) -> None:
