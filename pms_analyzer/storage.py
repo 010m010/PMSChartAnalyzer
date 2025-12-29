@@ -25,38 +25,85 @@ def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_config() -> Dict[str, str]:
+def load_config() -> Dict[str, object]:
     if CONFIG_PATH.exists():
         return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return {}
 
 
-def save_config(config: Dict[str, str]) -> None:
+def save_config(config: Dict[str, object]) -> None:
     ensure_config_dir()
     CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
 
+@dataclass
+class SavedDifficultyTable:
+    url: str
+    name: Optional[str] = None
 
-def get_saved_tables() -> list[str]:
-    config = load_config()
-    return list(config.get("difficulty_urls", [])) if isinstance(config.get("difficulty_urls", []), list) else []
+
+def _normalize_saved_tables(config: Dict[str, object]) -> list[SavedDifficultyTable]:
+    raw_tables = config.get("difficulty_tables")
+    tables: list[SavedDifficultyTable] = []
+
+    if isinstance(raw_tables, list):
+        for item in raw_tables:
+            if isinstance(item, dict) and "url" in item:
+                tables.append(SavedDifficultyTable(url=str(item.get("url")), name=item.get("name") or None))
+            elif isinstance(item, str):
+                tables.append(SavedDifficultyTable(url=item, name=None))
+
+    # Backward compatibility: migrate from the old difficulty_urls list[str]
+    raw_urls = config.get("difficulty_urls")
+    if isinstance(raw_urls, list):
+        for url in raw_urls:
+            if isinstance(url, str) and all(existing.url != url for existing in tables):
+                tables.append(SavedDifficultyTable(url=url, name=None))
+
+    return tables
 
 
-def add_saved_table(url: str) -> None:
-    config = load_config()
-    urls = list(config.get("difficulty_urls", [])) if isinstance(config.get("difficulty_urls", []), list) else []
-    if url not in urls:
-        urls.append(url)
-    config["difficulty_urls"] = urls
+def _write_saved_tables(config: Dict[str, object], tables: list[SavedDifficultyTable]) -> None:
+    config["difficulty_tables"] = [{"url": t.url, "name": t.name} for t in tables]
+    # Keep legacy key in sync so older versions continue to work
+    config["difficulty_urls"] = [t.url for t in tables]
     save_config(config)
+
+
+def get_saved_tables() -> list[SavedDifficultyTable]:
+    config = load_config()
+    return _normalize_saved_tables(config)
+
+
+def add_saved_table(url: str, *, name: Optional[str] = None) -> None:
+    config = load_config()
+    tables = _normalize_saved_tables(config)
+    for table in tables:
+        if table.url == url:
+            if name:
+                table.name = name
+            _write_saved_tables(config, tables)
+            return
+    tables.append(SavedDifficultyTable(url=url, name=name))
+    _write_saved_tables(config, tables)
+
+
+def update_saved_table_name(url: str, name: str) -> None:
+    config = load_config()
+    tables = _normalize_saved_tables(config)
+    updated = False
+    for table in tables:
+        if table.url == url:
+            table.name = name
+            updated = True
+            break
+    if updated:
+        _write_saved_tables(config, tables)
 
 
 def remove_saved_table(url: str) -> None:
     config = load_config()
-    urls = list(config.get("difficulty_urls", [])) if isinstance(config.get("difficulty_urls", []), list) else []
-    if url in urls:
-        urls.remove(url)
-    config["difficulty_urls"] = urls
-    save_config(config)
+    tables = [table for table in _normalize_saved_tables(config) if table.url != url]
+    _write_saved_tables(config, tables)
 
 
 def load_history() -> Dict[str, List[Dict[str, object]]]:
@@ -102,6 +149,11 @@ __all__ = [
     "append_history",
     "load_config",
     "save_config",
+    "SavedDifficultyTable",
     "history_by_difficulty",
     "ensure_config_dir",
+    "get_saved_tables",
+    "add_saved_table",
+    "update_saved_table_name",
+    "remove_saved_table",
 ]

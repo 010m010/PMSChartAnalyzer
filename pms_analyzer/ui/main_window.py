@@ -53,12 +53,14 @@ from ..theme import apply_app_palette
 from ..utils import difficulty_sort_key
 from ..storage import (
     AnalysisRecord,
+    SavedDifficultyTable,
     add_saved_table,
     append_history,
     get_saved_tables,
     load_config,
-    save_config,
     remove_saved_table,
+    save_config,
+    update_saved_table_name,
 )
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 
@@ -743,9 +745,8 @@ class DifficultyTab(QWidget):
         self._cached_results: Dict[str, List[ChartAnalysis]] = {}
         self._cached_symbols: Dict[str, str] = {}
         self._current_symbol: str = ""
-        self._cached_results: Dict[str, List[ChartAnalysis]] = {}
-        self._current_symbol: str = ""
         self._current_url: Optional[str] = None
+        self._saved_tables: list[SavedDifficultyTable] = []
         self._worker: Optional[DifficultyTableWorker] = None
         self._open_single_callback: Optional[callable[[Path], None]] = None
         self._build_ui()
@@ -848,7 +849,7 @@ class DifficultyTab(QWidget):
 
         self.load_button.clicked.connect(self._select_table)
         self.analyze_button.clicked.connect(self._analyze_table)
-        self.url_list.currentTextChanged.connect(self._on_select_saved)
+        self.url_list.currentIndexChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
         self.chart_type_selector.currentTextChanged.connect(lambda: self._refresh_chart_only(clear_scale=True))
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
@@ -873,7 +874,8 @@ class DifficultyTab(QWidget):
         self._start_download(url)
 
     def _analyze_table(self) -> None:
-        url = self.url_list.currentText().strip()
+        url_data = self.url_list.currentData()
+        url = str(url_data).strip() if url_data else self.url_list.currentText().strip()
         if not url:
             return
         self._start_download(url, add_to_saved=False, force_refresh=True)
@@ -882,12 +884,17 @@ class DifficultyTab(QWidget):
         self.analyze_button.setEnabled(True)
         self.load_button.setEnabled(True)
         self._latest_analyses = analyses
-        self._cached_results[self._current_url or ""] = analyses
+        current_url = self._current_url or ""
+        self._cached_results[current_url] = analyses
         if self._current_url:
             self._cached_symbols[self._current_url] = table.symbol or ""
+            if table.name:
+                update_saved_table_name(self._current_url, table.name)
         self._current_symbol = table.symbol or ""
         self._render_table_and_chart()
         self.loading_label.setText("")
+        if self._current_url:
+            self._refresh_saved_urls(keep_url=self._current_url)
 
     def _on_failed(self, error_message: str) -> None:
         self.analyze_button.setEnabled(True)
@@ -896,7 +903,9 @@ class DifficultyTab(QWidget):
         QMessageBox.critical(self, "エラー", error_message)
 
     def _start_download(self, url: str, *, add_to_saved: bool = True, force_refresh: bool = False) -> None:
-        name = Path(url).stem or "table"
+        saved_entry = next((table for table in self._saved_tables if table.url == url), None)
+        fallback_name = Path(url).stem or url or "table"
+        name = (saved_entry.name if saved_entry and saved_entry.name else None) or fallback_name
         self.analyze_button.setEnabled(False)
         self.load_button.setEnabled(False)
         self.loading_label.setText("読み込み/解析中です。数分かかる場合があります...")
@@ -927,37 +936,69 @@ class DifficultyTab(QWidget):
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
         if add_to_saved:
-            add_saved_table(url)
-            self._refresh_saved_urls()
+            add_saved_table(url, name=(saved_entry.name if saved_entry and saved_entry.name else url))
+            self._refresh_saved_urls(keep_url=url)
         self.refresh_songdata_label()
 
-    def _refresh_saved_urls(self) -> None:
-        self.url_list.clear()
-        urls = get_saved_tables()
-        self.url_list.addItems(urls)
-        if urls:
-            self.url_list.setCurrentIndex(0)
-            cached = self._cached_results.get(urls[0])
-            if cached:
-                self._latest_analyses = cached
-                self._current_symbol = self._cached_symbols.get(urls[0], "")
-                self._render_table_and_chart()
-                self._reset_sorting_safe()
-                self._sync_filter_options()
-                self._apply_filter_defaults()
+    def _refresh_saved_urls(self, *, keep_url: Optional[str] = None) -> None:
+        if keep_url is None:
+            keep_url = self._current_url or (self.url_list.currentData() if self.url_list.count() else None)
+            if not keep_url and self.url_list.count():
+                keep_url = self.url_list.currentText()
 
-    def _on_select_saved(self, value: str) -> None:
-        if value:
-            if value in self._cached_results:
-                self._latest_analyses = self._cached_results[value]
-                self._current_symbol = self._cached_symbols.get(value, "")
-                self._render_table_and_chart()
-                self._reset_sorting_safe()
-                self._sync_filter_options()
-                self._apply_filter_defaults()
+        self.url_list.blockSignals(True)
+        self.url_list.clear()
+        self._saved_tables = get_saved_tables()
+        for table in self._saved_tables:
+            display = table.name or table.url
+            self.url_list.addItem(display, table.url)
+        target_index = 0
+        if keep_url:
+            for idx in range(self.url_list.count()):
+                data = self.url_list.itemData(idx)
+                if data == keep_url or self.url_list.itemText(idx) == keep_url:
+                    target_index = idx
+                    break
+        if self.url_list.count():
+            self.url_list.setCurrentIndex(target_index)
+        self.url_list.blockSignals(False)
+
+        if self.url_list.count():
+            selected_url = self.url_list.currentData() or self.url_list.currentText()
+            self._current_url = str(selected_url)
+            self._load_cached_for_url(str(selected_url))
+        else:
+            self._current_url = None
+            self._latest_analyses = []
+            self._current_symbol = ""
+            self._render_table_and_chart()
+
+    def _load_cached_for_url(self, url: str) -> None:
+        if url in self._cached_results:
+            self._latest_analyses = self._cached_results[url]
+            self._current_symbol = self._cached_symbols.get(url, "")
+            self._render_table_and_chart()
+            self._reset_sorting_safe()
+            self._sync_filter_options()
+            self._apply_filter_defaults()
+        else:
+            self._latest_analyses = []
+            self._current_symbol = ""
+            self._render_table_and_chart()
+
+    def _on_select_saved(self, index: int) -> None:
+        if index < 0 or index >= self.url_list.count():
+            return
+        url_data = self.url_list.itemData(index)
+        url = str(url_data) if url_data else self.url_list.itemText(index)
+        if not url:
+            return
+        self._current_url = url
+        self._load_cached_for_url(url)
 
     def _delete_saved(self) -> None:
-        current = self.url_list.currentText()
+        current_data = self.url_list.currentData()
+        current = str(current_data) if current_data else self.url_list.currentText()
         if not current:
             return
         remove_saved_table(current)
@@ -1379,13 +1420,24 @@ class DifficultyTab(QWidget):
             self._filter_selection = {cb.text() for cb in checkboxes if cb.isChecked()}
             self._render_table_and_chart()
 
+    def _get_column_index(self, header_name: str) -> int | None:
+        for idx in range(self.table_widget.columnCount()):
+            header_item = self.table_widget.horizontalHeaderItem(idx)
+            if header_item and header_item.text() == header_name:
+                return idx
+        return None
+
     def _show_table_context_menu(self, pos) -> None:
         item = self.table_widget.itemAt(pos)
         if item is None:
             return
         row = item.row()
-        title_item = self.table_widget.item(row, 1)
-        path_item = self.table_widget.item(row, 12)
+        title_col = self._get_column_index("曲名")
+        path_col = self._get_column_index("Path")
+        if path_col is None:
+            return
+        title_item = self.table_widget.item(row, title_col) if title_col is not None else None
+        path_item = self.table_widget.item(row, path_col)
         if path_item is None or not path_item.text():
             return
         path = Path(path_item.text())
