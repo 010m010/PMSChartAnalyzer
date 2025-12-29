@@ -421,6 +421,7 @@ class SingleAnalysisTab(QWidget):
                 total_time=density.duration,
                 terminal_window=density.terminal_window,
                 y_max=self._manual_y_max_single,
+                preserve_selection=True,
             )
 
     def _apply_single_scale(self) -> None:
@@ -464,6 +465,7 @@ class SingleAnalysisTab(QWidget):
             terminal_window=density.terminal_window,
             y_max=self._manual_y_max_single,
             show_smoothed_line=self._show_smoothed_line,
+            preserve_selection=True,
         )
         return title_text
 

@@ -33,6 +33,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
         self._x_limits: tuple[float, float] | None = None
+        self._selected_bins: tuple[int, int] | None = None
+        self._last_plot_state: dict[str, object] | None = None
         self._span_selector = SpanSelector(
             self.ax,
             self._on_span_select,
@@ -56,7 +58,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
     def set_theme_mode(self, mode: ThemeMode) -> None:
         self.theme_mode = mode
         self._style_axes(dark=self._is_dark_mode())
-        self.draw()
+        self._redraw_last_plot(preserve_selection=True)
 
     def _style_axes(self, *, dark: bool) -> None:
         face = "#1f1f1f" if dark else "#f2f4f8"
@@ -90,9 +92,19 @@ class StackedDensityChart(FigureCanvasQTAgg):
         terminal_window: float | None = None,
         y_max: float | None = None,
         show_smoothed_line: bool = True,
+        preserve_selection: bool = False,
     ) -> None:
+        self._last_plot_state = {
+            "per_second_by_key": per_second_by_key,
+            "title": title,
+            "total_time": total_time,
+            "terminal_window": terminal_window,
+            "y_max": y_max,
+            "show_smoothed_line": show_smoothed_line,
+        }
+        saved_selection = self._selected_bins if preserve_selection else None
+        self._clear_selection(reset_saved=not preserve_selection)
         self.ax.clear()
-        self._clear_selection()
         dark = self._is_dark_mode()
         self._style_axes(dark=dark)
         if not per_second_by_key:
@@ -143,7 +155,10 @@ class StackedDensityChart(FigureCanvasQTAgg):
             self.ax.set_ylim(top=y_max)
         self._set_x_limits(len(per_second_by_key))
         self.figure.tight_layout()
-        self.draw()
+        if preserve_selection and saved_selection:
+            self._draw_selection_region(*saved_selection, update_saved=True)
+        else:
+            self.draw()
 
     def _color_for_density(self, density: int) -> str:
         # Bucket every 10 density and map to a perceptually-uniform colormap
@@ -166,11 +181,17 @@ class StackedDensityChart(FigureCanvasQTAgg):
         end_bin = max(start_bin + 1, int((-(-end_raw // 1))))  # ceil for ints
         if self._bars:
             end_bin = min(end_bin, len(self._bars))
-        self._draw_selection_region(start_bin, end_bin)
+        self._draw_selection_region(start_bin, end_bin, update_saved=True)
         if self._selection_callback:
             self._selection_callback(float(start_bin), float(end_bin))
 
-    def _draw_selection_region(self, start_bin: int, end_bin: int) -> None:
+    def _draw_selection_region(self, start_bin: int, end_bin: int, *, update_saved: bool = False) -> None:
+        max_bin = len(self._bars) if self._bars else 0
+        if max_bin:
+            start_bin = max(min(start_bin, max_bin - 1), 0)
+            end_bin = max(start_bin + 1, min(end_bin, max_bin))
+        if update_saved:
+            self._selected_bins = (start_bin, end_bin)
         if self._selection_artist:
             try:
                 self._selection_artist.remove()
@@ -185,7 +206,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._restore_x_limits()
         self.draw_idle()
 
-    def _clear_selection(self) -> None:
+    def _clear_selection(self, *, reset_saved: bool = True) -> None:
         if self._span_selector:
             try:
                 self._span_selector.clear()
@@ -198,6 +219,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
             except (ValueError, NotImplementedError):
                 self._selection_artist.set_visible(False)
             self._selection_artist = None
+        if reset_saved:
+            self._selected_bins = None
         self._reset_bar_geometry()
         if self._bars:
             for patch, color in zip(self._bars, self._bar_colors):
@@ -291,6 +314,25 @@ class StackedDensityChart(FigureCanvasQTAgg):
             self.ax.set_xlim(self._x_limits)
             self.ax.set_autoscalex_on(False)
 
+    def _redraw_last_plot(self, *, preserve_selection: bool = False) -> None:
+        if not self._last_plot_state:
+            self.draw_idle()
+            return
+        self.plot(
+            self._last_plot_state["per_second_by_key"],
+            title=self._last_plot_state["title"],
+            total_time=self._last_plot_state["total_time"],
+            terminal_window=self._last_plot_state["terminal_window"],
+            y_max=self._last_plot_state["y_max"],
+            show_smoothed_line=self._last_plot_state["show_smoothed_line"],
+            preserve_selection=preserve_selection,
+        )
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.figure.tight_layout()
+        self._redraw_last_plot(preserve_selection=True)
+
 
 class BoxPlotCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -299,6 +341,7 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         super().__init__(self.figure)
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
+        self._last_plot_state: dict[str, object] | None = None
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -314,7 +357,7 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
     def set_theme_mode(self, mode: ThemeMode) -> None:
         self.theme_mode = mode
         self._style_axes(dark=self._is_dark_mode())
-        self.draw()
+        self._redraw_last_plot()
 
     def _style_axes(self, *, dark: bool) -> None:
         face = "#1f1f1f" if dark else "#f2f4f8"
@@ -341,6 +384,12 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         y_limits: Optional[tuple[float, float]] = None,
         overlay_line: Optional[tuple[float, str, str]] = None,
     ) -> None:
+        self._last_plot_state = {
+            "values": values,
+            "metric_name": metric_name,
+            "y_limits": y_limits,
+            "overlay_line": overlay_line,
+        }
         self.ax.clear()
         dark = self._is_dark_mode()
         if not values:
@@ -381,6 +430,22 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.figure.tight_layout()
         self.draw()
 
+    def _redraw_last_plot(self) -> None:
+        if not self._last_plot_state:
+            self.draw_idle()
+            return
+        self.plot(
+            self._last_plot_state["values"],
+            self._last_plot_state["metric_name"],
+            y_limits=self._last_plot_state["y_limits"],
+            overlay_line=self._last_plot_state["overlay_line"],
+        )
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.figure.tight_layout()
+        self._redraw_last_plot()
+
 
 class DifficultyScatterChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -390,6 +455,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.setParent(parent)
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
+        self._last_plot_state: dict[str, object] | None = None
 
     def _is_dark_mode(self) -> bool:
         if self.theme_mode == "dark":
@@ -405,7 +471,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
     def set_theme_mode(self, mode: ThemeMode) -> None:
         self.theme_mode = mode
         self._style_axes(dark=self._is_dark_mode())
-        self.draw()
+        self._redraw_last_plot()
 
     def _style_axes(self, y_label: str = "密度", *, dark: bool) -> None:
         face = "#1f1f1f" if dark else "#f2f4f8"
@@ -434,6 +500,14 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         y_limits: Optional[tuple[float, float]] = None,
         overlay_line: Optional[tuple[float, str, str]] = None,
     ) -> None:
+        self._last_plot_state = {
+            "points": points,
+            "y_label": y_label,
+            "order": order,
+            "sort_key": sort_key,
+            "y_limits": y_limits,
+            "overlay_line": overlay_line,
+        }
         self.ax.clear()
         dark = self._is_dark_mode()
         self._style_axes(y_label=y_label, dark=dark)
@@ -468,6 +542,24 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         cmap = cm.get_cmap("plasma", 10)
         r, g, b, _ = cmap(bucket)
         return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
+
+    def _redraw_last_plot(self) -> None:
+        if not self._last_plot_state:
+            self.draw_idle()
+            return
+        self.plot(
+            self._last_plot_state["points"],
+            y_label=self._last_plot_state["y_label"],
+            order=self._last_plot_state["order"],
+            sort_key=self._last_plot_state["sort_key"],
+            y_limits=self._last_plot_state["y_limits"],
+            overlay_line=self._last_plot_state["overlay_line"],
+        )
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.figure.tight_layout()
+        self._redraw_last_plot()
 
 
 __all__ = ["StackedDensityChart", "BoxPlotCanvas", "DifficultyScatterChart"]
