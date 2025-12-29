@@ -53,7 +53,7 @@ class ParseResult:
 
 
 class PMSParser:
-    header_pattern = re.compile(r"^#(\w+)(?:\s+(.+))?", re.IGNORECASE)
+    header_pattern = re.compile(r"^#(\w+)(?::|\s+)?(.*)$", re.IGNORECASE)
     line_pattern = re.compile(r"^#(\d{3})(\d{2}):(.+)$")
 
     def __init__(self, *, default_bpm: float = 130.0) -> None:
@@ -80,10 +80,26 @@ class PMSParser:
             if not line or line.startswith("//"):
                 continue
 
+            line_match = self.line_pattern.match(line)
+            if line_match:
+                measure = int(line_match.group(1))
+                channel = int(line_match.group(2))
+                data = line_match.group(3)
+                if channel == 2:  # measure length (e.g., #00102:1.50)
+                    try:
+                        measure_lengths[measure] = float(data)
+                    except ValueError:
+                        pass
+                    continue
+                measures.setdefault(measure, []).append((channel, data))
+                continue
+
             header_match = self.header_pattern.match(line)
-            if header_match and ":" not in line:
+            if header_match:
                 tag = header_match.group(1).upper()
-                value = (header_match.group(2) or "").strip()
+                value = (header_match.group(2) or "").lstrip()
+                if value.startswith(":"):
+                    value = value[1:].lstrip()
                 if tag == "BPM" and value:
                     try:
                         bpm = float(value)
@@ -125,21 +141,6 @@ class PMSParser:
                         except ValueError:
                             pass
                 continue
-
-            line_match = self.line_pattern.match(line)
-            if not line_match:
-                continue
-
-            measure = int(line_match.group(1))
-            channel = int(line_match.group(2))
-            data = line_match.group(3)
-            if channel == 2:  # measure length (e.g., #00102:1.50)
-                try:
-                    measure_lengths[measure] = float(data)
-                except ValueError:
-                    pass
-                continue
-            measures.setdefault(measure, []).append((channel, data))
 
         notes, total_time, bpm_stats = self._convert_to_notes(measures, bpm, bpm_defs, measure_lengths)
         start_bpm, min_bpm, max_bpm = bpm_stats
