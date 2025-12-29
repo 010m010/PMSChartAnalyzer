@@ -359,11 +359,6 @@ class DifficultyTab(QWidget):
         saved_layout.addWidget(self.delete_button)
         layout.addLayout(saved_layout)
 
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(self.filter_button)
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
-
         layout.addWidget(self.loading_label)
         layout.addWidget(self.songdata_label)
 
@@ -375,6 +370,10 @@ class DifficultyTab(QWidget):
         table_layout.setContentsMargins(0, 0, 0, 0)
         table_layout.addWidget(self.table_widget)
         table_container.setLayout(table_layout)
+
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(self.filter_button)
+        filter_layout.addStretch()
 
         chart_container = QWidget()
         chart_layout = QVBoxLayout()
@@ -419,6 +418,7 @@ class DifficultyTab(QWidget):
 
         splitter.addWidget(table_container)
         splitter.addWidget(chart_container)
+        layout.addLayout(filter_layout)
         layout.addWidget(splitter)
         self.setLayout(layout)
 
