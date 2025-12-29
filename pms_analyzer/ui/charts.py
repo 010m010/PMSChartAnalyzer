@@ -58,9 +58,11 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
-        face = "black" if dark else "white"
-        text = "white" if dark else "black"
-        grid = "#444" if dark else "#ccc"
+        face = "#1f1f1f" if dark else "#ffffff"
+        text = "#e6e6e6" if dark else "#202020"
+        grid = "#555555" if dark else "#d0d0d0"
+        accent = "#7CC7FF" if dark else "#0066CC"
+
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text)
@@ -71,7 +73,11 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self.ax.spines["right"].set_visible(False)
         self.ax.set_xlabel("Seconds", color=text)
         self.ax.set_ylabel("Notes", color=text)
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
+        self.ax.tick_params(axis="x", labelcolor=text)
+        self.ax.tick_params(axis="y", labelcolor=text)
+        self.ax.title.set_color(text)
+        self._line_color = accent
 
     def plot(
         self,
@@ -97,17 +103,17 @@ class StackedDensityChart(FigureCanvasQTAgg):
         colors = [self._color_for_density(val) for val in totals]
         self._bar_colors = colors
         self._bars = self.ax.bar(x, totals, color=colors, width=0.9)
-        grid = "#444" if dark else "#ccc"
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
+        grid = "#555555" if dark else "#d0d0d0"
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
         if title:
-            self.ax.set_title(title, color="white" if dark else "black")
+            self.ax.set_title(title, color="#e6e6e6" if dark else "#202020")
         else:
-            self.ax.set_title("秒間密度", color="white" if dark else "black")
+            self.ax.set_title("秒間密度", color="#e6e6e6" if dark else "#202020")
         if total_time and terminal_window:
             start = max(total_time - terminal_window, 0)
             start_bin = int(start)
             end_bin = len(per_second_by_key)
-            face = "#888888" if dark else "#CCCCCC"
+            face = "#3A3A3A" if dark else "#D9D9D9"
             start_edge = max(start_bin - 0.5, -0.5)
             end_edge = end_bin - 0.5
             self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
@@ -115,7 +121,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 max(start_edge + 0.2, 0.0),
                 self.ax.get_ylim()[1] * 0.9,
                 "終端範囲",
-                color="black" if not dark else "white",
+                color="#e6e6e6" if dark else "#202020",
                 fontsize=9,
             )
         smoothed = self._smooth_density_wave(totals)
@@ -124,7 +130,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
             self.ax.plot(
                 x,
                 smoothed,
-                color=line_color,
+                color=self._line_color,
                 linewidth=2.0,
                 alpha=0.9,
                 zorder=3,
@@ -166,7 +172,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
                 self._selection_artist.remove()
             except ValueError:
                 pass
-        face = "#66CCFF" if not self._is_dark_mode() else "#2E8BC0"
+        face = "#4EB2FF" if not self._is_dark_mode() else "#2E8BC0"
         start_edge = start_bin - 0.5
         end_edge = end_bin - 0.5
         self._selection_artist = self.ax.axvspan(start_edge, end_edge, color=face, alpha=0.2, zorder=0)
@@ -280,9 +286,9 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, *, dark: bool) -> None:
-        face = "black" if dark else "white"
-        text = "white" if dark else "black"
-        grid = "#444" if dark else "#ccc"
+        face = "#1f1f1f" if dark else "#ffffff"
+        text = "#e6e6e6" if dark else "#202020"
+        grid = "#555555" if dark else "#d0d0d0"
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text, rotation=45)
@@ -293,7 +299,7 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
             self.ax.spines[spine].set_visible(False)
         self.ax.set_title(self.ax.get_title(), color=text)
         self.ax.set_ylabel(self.ax.get_ylabel(), color=text)
-        self.ax.grid(True, linestyle=":", linewidth=0.5, color=grid)
+        self.ax.grid(True, linestyle=":", linewidth=0.6, color=grid)
 
     def plot(self, values: Dict[str, List[float]], metric_name: str, *, y_limits: Optional[tuple[float, float]] = None) -> None:
         self.ax.clear()
@@ -305,9 +311,9 @@ class BoxPlotCanvas(FigureCanvasQTAgg):
         labels = list(values.keys())
         data = [values[label] for label in labels]
         colors = {
-            "edge": "#66CCFF" if dark else "#004A80",
-            "fill": "#224466" if dark else "#B3D9FF",
-            "median": "#FFCC66" if dark else "#CC6600",
+            "edge": "#7CC7FF" if dark else "#004A80",
+            "fill": "#1F3A5A" if dark else "#B3D9FF",
+            "median": "#FFD27F" if dark else "#CC6600",
         }
         bp = self.ax.boxplot(
             data,
@@ -357,9 +363,9 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.draw()
 
     def _style_axes(self, y_label: str = "密度", *, dark: bool) -> None:
-        face = "black" if dark else "white"
-        text = "white" if dark else "black"
-        grid = "#444" if dark else "#ccc"
+        face = "#1f1f1f" if dark else "#ffffff"
+        text = "#e6e6e6" if dark else "#202020"
+        grid = "#555555" if dark else "#d0d0d0"
         self.figure.set_facecolor(face)
         self.ax.set_facecolor(face)
         self.ax.tick_params(axis="x", colors=text, rotation=45)
@@ -370,7 +376,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             self.ax.spines[spine].set_visible(False)
         self.ax.set_xlabel("難易度", color=text)
         self.ax.set_ylabel(y_label, color=text)
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
 
     def plot(
         self,
@@ -394,11 +400,11 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         filtered = [(d, den) for d, den in points if d in pos_map]
         x = [pos_map[d] for d, _ in filtered]
         y_vals = [den for _, den in filtered]
-        marker_color = "#66CCFF" if dark else "#0066CC"
+        marker_color = "#7CC7FF" if dark else "#0066CC"
         self.ax.scatter(x, y_vals, c=marker_color, alpha=0.85)
         self.ax.set_xticks(list(pos_map.values()), labels=unique)
-        grid = "#444" if dark else "#ccc"
-        self.ax.grid(color=grid, linestyle=":", linewidth=0.5)
+        grid = "#555555" if dark else "#d0d0d0"
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.6)
         if y_limits:
             self.ax.set_ylim(*y_limits)
         self.figure.tight_layout()
