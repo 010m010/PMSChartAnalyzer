@@ -260,26 +260,9 @@ class SingleAnalysisTab(QWidget):
             "rms_density": "RMS",
         }
         for row, (key, title) in enumerate(labels.items()):
-            if key == "rms_density":
-                title_label = QLabel(title)
-                info = QLabel("？")
-                info.setToolTip("秒間密度の二乗平均平方根。ゲージの増加量を加味しており、休憩地帯や局所難の影響を受けにくい。")
-                info.setFixedWidth(16)
-                info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                info.setStyleSheet(
-                    "QLabel { border: 1px solid #888; border-radius: 8px; background: #eee; color: #333; }"
-                )
-                info_layout = QHBoxLayout()
-                info_layout.addWidget(title_label)
-                info_layout.addWidget(info)
-                info_layout.addStretch()
-                container = QWidget()
-                container.setLayout(info_layout)
-                grid.addWidget(container, row, 0)
-            else:
-                lbl = QLabel(title)
-                lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                grid.addWidget(lbl, row, 0)
+            lbl = QLabel(title)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(lbl, row, 0)
             value_label = QLabel("-")
             value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             value_label.setWordWrap(False)
