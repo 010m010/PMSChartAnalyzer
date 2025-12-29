@@ -196,6 +196,11 @@ class SingleAnalysisTab(QWidget):
         chart_layout.addLayout(scale_layout)
         chart_container.setLayout(chart_layout)
 
+        bottom_container = QWidget()
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_container.setLayout(bottom_layout)
+
         info_group = QGroupBox("基本情報")
         info_grid = QGridLayout()
         info_fields = [
@@ -306,10 +311,17 @@ class SingleAnalysisTab(QWidget):
         details_layout.addWidget(metrics_group, 1)
         details_layout.addWidget(range_group, 1)
 
-        main_layout.addWidget(chart_container, 3)
-        main_layout.addLayout(details_layout)
-        main_layout.addWidget(self.status_label)
-        main_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        bottom_layout.addLayout(details_layout)
+        bottom_layout.addWidget(self.status_label)
+        bottom_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(chart_container)
+        splitter.addWidget(bottom_container)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+
+        main_layout.addWidget(splitter)
         self.setLayout(main_layout)
 
         self._set_label_text(self.file_label, self.file_label.text())
