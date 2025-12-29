@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional
 
 import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 from matplotlib.widgets import SpanSelector
@@ -19,6 +20,16 @@ rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 matplotlib.use("Agg")
 
 ThemeMode = str  # "system", "light", "dark"
+
+DARK_DENSITY_CMAP = LinearSegmentedColormap.from_list(
+    "density_dark",
+    [
+        "#D6E676",  # yellow-green
+        "#6AD18C",  # bright green
+        "#1BA7A0",  # blue-green
+    ],
+    N=10,
+)
 
 class StackedDensityChart(FigureCanvasQTAgg):
     def __init__(self, parent=None):  # type: ignore[override]
@@ -167,7 +178,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
     def _color_for_density(self, density: int, *, dark: bool) -> str:
         # Bucket every 10 density and map to a perceptually-uniform colormap
         bucket = min(density // 10, 9)
-        cmap = cm.get_cmap("Greens", 10) if dark else cm.get_cmap("plasma", 10)
+        cmap = DARK_DENSITY_CMAP if dark else cm.get_cmap("plasma", 10)
         r, g, b, _ = cmap(bucket)
         return f"#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
 
