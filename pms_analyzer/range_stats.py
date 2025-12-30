@@ -15,6 +15,7 @@ class RangeSelectionStats:
     average_density: float
     rms_density: float
     cms_density: float
+    chm_density: float
 
 
 def compute_range_rms(per_second: List[int], bin_size: float, start: float, end: float) -> float:
@@ -45,6 +46,23 @@ def compute_range_cms(per_second: List[int], bin_size: float, start: float, end:
             continue
         weighted_sum += (val**3) * overlap
     return (weighted_sum / total_duration) ** (1.0 / 3.0) if total_duration > 0 else 0.0
+
+
+def compute_range_chm(per_second: List[int], bin_size: float, start: float, end: float) -> float:
+    if end <= start or not per_second or bin_size <= 0:
+        return 0.0
+    total_duration = end - start
+    weighted_square_sum = 0.0
+    weighted_linear_sum = 0.0
+    for idx, val in enumerate(per_second):
+        bin_start = idx * bin_size
+        bin_end = bin_start + bin_size
+        overlap = max(0.0, min(bin_end, end) - max(bin_start, start))
+        if overlap <= 0:
+            continue
+        weighted_square_sum += (val * val) * overlap
+        weighted_linear_sum += val * overlap
+    return weighted_square_sum / weighted_linear_sum if weighted_linear_sum > 0 else 0.0
 
 
 def calculate_range_selection_stats(
@@ -93,6 +111,7 @@ def calculate_range_selection_stats(
 
     rms_density = compute_range_rms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
     cms_density = compute_range_cms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
+    chm_density = compute_range_chm(per_second_total, resolved_bin_size, start_seconds, end_seconds)
 
     return RangeSelectionStats(
         start_seconds=start_seconds,
@@ -102,6 +121,7 @@ def calculate_range_selection_stats(
         average_density=average_density,
         rms_density=rms_density,
         cms_density=cms_density,
+        chm_density=chm_density,
     )
 
 
@@ -110,4 +130,5 @@ __all__ = [
     "calculate_range_selection_stats",
     "compute_range_rms",
     "compute_range_cms",
+    "compute_range_chm",
 ]

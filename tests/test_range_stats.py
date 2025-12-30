@@ -1,6 +1,11 @@
 from pytest import approx
 
-from pms_analyzer.range_stats import calculate_range_selection_stats, compute_range_cms, compute_range_rms
+from pms_analyzer.range_stats import (
+    calculate_range_selection_stats,
+    compute_range_chm,
+    compute_range_cms,
+    compute_range_rms,
+)
 from pms_analyzer.pms_parser import Note
 
 
@@ -12,9 +17,11 @@ def test_compute_range_cms_and_rms_partial_overlap() -> None:
 
     rms = compute_range_rms(per_second, bin_size, start, end)
     cms = compute_range_cms(per_second, bin_size, start, end)
+    chm = compute_range_chm(per_second, bin_size, start, end)
 
     assert rms == approx((5.0 / 2.0) ** 0.5)
     assert cms == approx(4.5 ** (1.0 / 3.0))
+    assert chm == approx((1 + 4) / (1 + 2))
 
 
 def test_range_selection_stats_includes_cms_density() -> None:
@@ -33,3 +40,4 @@ def test_range_selection_stats_includes_cms_density() -> None:
     assert stats is not None
     assert stats.cms_density > 0
     assert stats.rms_density > 0
+    assert stats.chm_density > 0
