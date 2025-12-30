@@ -126,6 +126,13 @@ def _quantiles(values: List[float]) -> Dict[str, float | None]:
     }
 
 
+def _format_percent(value: float | None) -> tuple[str, float | None]:
+    if value is None:
+        return "-", None
+    percent_value = value * 100
+    return f"{percent_value:.2f}%", percent_value
+
+
 class SortableTableWidgetItem(QTableWidgetItem):
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, QTableWidgetItem):
@@ -494,9 +501,7 @@ class SingleAnalysisTab(QWidget):
             "-" if terminal_difficulty_chm_value is None else f"{terminal_difficulty_chm_value:.2f}"
         )
         self._set_label_text(self.metrics_labels["terminal_difficulty_chm"], terminal_diff_chm_text)
-        terminal_diff_chm_ratio_text = (
-            "-" if terminal_difficulty_chm_ratio_value is None else f"{terminal_difficulty_chm_ratio_value:.2f}"
-        )
+        terminal_diff_chm_ratio_text, _ = _format_percent(terminal_difficulty_chm_ratio_value)
         self._set_label_text(self.metrics_labels["terminal_difficulty_chm_ratio"], terminal_diff_chm_ratio_text)
         self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
         self._apply_metric_label_colors(
@@ -1274,11 +1279,11 @@ class DifficultyTab(QWidget):
             terminal_diff_chm_ratio_value: float | None = (
                 density.terminal_difficulty_chm_ratio if terminal_available else None
             )
-            terminal_diff_chm_ratio_text = (
-                "-" if terminal_diff_chm_ratio_value is None else f"{terminal_diff_chm_ratio_value:.2f}"
+            terminal_diff_chm_ratio_text, terminal_diff_chm_ratio_percent = _format_percent(
+                terminal_diff_chm_ratio_value
             )
             terminal_diff_chm_ratio_sort = (
-                float("-inf") if terminal_diff_chm_ratio_value is None else float(terminal_diff_chm_ratio_value)
+                float("-inf") if terminal_diff_chm_ratio_percent is None else float(terminal_diff_chm_ratio_percent)
             )
             terminal_diff_chm_ratio_item = SortableTableWidgetItem(terminal_diff_chm_ratio_text)
             terminal_diff_chm_ratio_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_chm_ratio_sort)
@@ -1440,7 +1445,7 @@ class DifficultyTab(QWidget):
         if metric == "終端難度数（CHM）2":
             if not terminal_available:
                 return None
-            return density.terminal_difficulty_chm_ratio
+            return density.terminal_difficulty_chm_ratio * 100
         if metric == "突風度数":
             return density.gustiness
         if metric == "増加率":
@@ -1504,7 +1509,7 @@ class DifficultyTab(QWidget):
         if metric == "終端難度数（CHM）2":
             if not terminal_available:
                 return None
-            return density.terminal_difficulty_chm_ratio
+            return density.terminal_difficulty_chm_ratio * 100
         if metric == "突風度数":
             return density.gustiness
         if metric == "増加率":
@@ -1591,7 +1596,10 @@ class DifficultyTab(QWidget):
             stats = _quantiles(values)
             labels = [stats["mean"], stats["min"], stats["q1"], stats["median"], stats["q3"], stats["max"]]
             for col, val in enumerate(labels, start=2):
-                text = "-" if val is None else f"{val:.2f}"
+                if metric == "終端難度数（CHM）2":
+                    text = "-" if val is None else f"{val:.2f}%"
+                else:
+                    text = "-" if val is None else f"{val:.2f}"
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
     def _apply_manual_scale(self) -> None:
