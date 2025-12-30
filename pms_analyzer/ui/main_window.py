@@ -4,11 +4,12 @@ import csv
 import html
 import traceback
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from statistics import mean
 
 from PyQt6.QtCore import QEvent, QThread, Qt, pyqtSignal, QUrl
-from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
+from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QDoubleValidator, QDragEnterEvent, QDropEvent, QDragMoveEvent, QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -127,6 +128,41 @@ def _quantiles(values: List[float]) -> Dict[str, float | None]:
         "max": sorted_vals[-1],
         "mean": mean(sorted_vals),
     }
+
+
+@dataclass
+class NumericFilterCondition:
+    column: Optional[str] = None
+    operator: str = "eq"
+    value: Optional[float] = None
+    secondary_value: Optional[float] = None
+
+
+FILTERABLE_COLUMNS = [
+    "NOTES数",
+    "TOTAL値",
+    "増加率",
+    "最大秒間密度",
+    "平均密度",
+    "体感密度",
+    "終端密度",
+    "終端体感密度",
+    "全体難度数",
+    "突風度数",
+    "終端突風度数",
+    "終端密度差",
+]
+
+FILTER_OPERATORS: list[tuple[str, str]] = [
+    ("eq", "＝"),
+    ("range", "～"),
+    ("gte", "≧"),
+    ("lte", "≦"),
+    ("gt", "＞"),
+    ("lt", "＜"),
+]
+
+MAX_FILTER_CONDITIONS = 10
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -762,6 +798,8 @@ class DifficultyTab(QWidget):
         self.scale_reset_button = QPushButton("リセット")
         self.show_unresolved_checkbox = QCheckBox("未解析を表示")
         self.show_total_undefined_checkbox = QCheckBox("TOTAL 未定義を表示")
+        self._saved_show_unresolved = False
+        self._saved_show_total_undefined = False
         self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
@@ -780,7 +818,12 @@ class DifficultyTab(QWidget):
                 "終端密度差",
             ]
         )
-        self.filter_button = QPushButton("絞り込み")
+        self.filter_button = QPushButton("フィルター")
+        self.filter_status_label = QLabel("")
+        self.filter_status_label.setStyleSheet("font-weight: bold; color: #d35400;")
+        self.filter_status_label.hide()
+        self._song_filter_query: str = ""
+        self._filter_conditions: list[NumericFilterCondition] = [NumericFilterCondition()]
         self._filter_selection: set[str] = set()
         self.summary_table = QTableWidget(0, 8)
         self.summary_table.setHorizontalHeaderLabels(
@@ -861,7 +904,6 @@ class DifficultyTab(QWidget):
         chart_layout.setContentsMargins(0, 0, 0, 0)
         chart_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         metric_layout = QHBoxLayout()
-        metric_layout.addWidget(self.filter_button)
         metric_layout.addStretch()
         metric_layout.addWidget(QLabel("縦軸:"))
         metric_layout.addWidget(self.metric_selector)
@@ -894,12 +936,20 @@ class DifficultyTab(QWidget):
         table_tab = QWidget()
         table_tab_layout = QVBoxLayout()
         table_tab_layout.setContentsMargins(0, 0, 0, 0)
-        visibility_layout = QHBoxLayout()
-        visibility_layout.addWidget(self.column_visibility_button)
-        visibility_layout.addWidget(self.show_unresolved_checkbox)
-        visibility_layout.addWidget(self.show_total_undefined_checkbox)
-        visibility_layout.addStretch()
-        visibility_layout.addWidget(self.export_table_button)
+        visibility_layout = QVBoxLayout()
+        visibility_top_row = QHBoxLayout()
+        visibility_top_row.addWidget(self.column_visibility_button)
+        visibility_top_row.addWidget(self.filter_button)
+        visibility_top_row.addWidget(self.filter_status_label)
+        visibility_top_row.addStretch()
+        visibility_top_row.addWidget(self.export_table_button)
+        visibility_layout.addLayout(visibility_top_row)
+
+        filter_toggle_row = QHBoxLayout()
+        filter_toggle_row.addWidget(self.show_unresolved_checkbox)
+        filter_toggle_row.addWidget(self.show_total_undefined_checkbox)
+        filter_toggle_row.addStretch()
+        visibility_layout.addLayout(filter_toggle_row)
         table_tab_layout.addLayout(visibility_layout)
         table_tab_layout.addWidget(self.table_widget)
         table_tab.setLayout(table_tab_layout)
@@ -941,12 +991,13 @@ class DifficultyTab(QWidget):
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
         self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
-        self.show_unresolved_checkbox.toggled.connect(self._render_table_and_chart)
-        self.show_total_undefined_checkbox.toggled.connect(self._render_table_and_chart)
+        self.show_unresolved_checkbox.toggled.connect(self._on_visibility_option_changed)
+        self.show_total_undefined_checkbox.toggled.connect(self._on_visibility_option_changed)
         self.column_visibility_button.clicked.connect(self._open_column_visibility_dialog)
         self.export_table_button.clicked.connect(self._export_table_csv)
         self.export_summary_button.clicked.connect(self._export_summary_csv)
         self._apply_column_visibility()
+        self._load_filter_state()
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -1564,6 +1615,163 @@ class DifficultyTab(QWidget):
             hidden = not self._column_visibility.get(label, True)
             header.setSectionHidden(idx, hidden)
 
+    def _load_filter_state(self) -> None:
+        config = load_config()
+        filters = config.get("difficulty_filters")
+        operator_keys = {op for op, _ in FILTER_OPERATORS}
+        conditions: list[NumericFilterCondition] = []
+        if isinstance(filters, dict):
+            raw_conditions = filters.get("conditions")
+            if isinstance(raw_conditions, list):
+                for item in raw_conditions[:MAX_FILTER_CONDITIONS]:
+                    if not isinstance(item, dict):
+                        continue
+                    column = item.get("column") if item.get("column") in FILTERABLE_COLUMNS else None
+                    operator = item.get("operator") if item.get("operator") in operator_keys else "eq"
+                    value = item.get("value")
+                    secondary_value = item.get("secondary_value")
+                    conditions.append(
+                        NumericFilterCondition(
+                            column=column,
+                            operator=operator or "eq",
+                            value=self._safe_float(value),
+                            secondary_value=self._safe_float(secondary_value),
+                        )
+                    )
+            self._song_filter_query = str(filters.get("song_query") or "")
+            saved_levels = filters.get("level_selection")
+            if isinstance(saved_levels, list):
+                self._filter_selection = {str(level) for level in saved_levels}
+            self._saved_show_unresolved = bool(filters.get("show_unresolved", False))
+            self._saved_show_total_undefined = bool(filters.get("show_total_undefined", False))
+        if not conditions:
+            conditions = [NumericFilterCondition()]
+        self._filter_conditions = conditions[:MAX_FILTER_CONDITIONS]
+        for checkbox, value in (
+            (self.show_unresolved_checkbox, self._saved_show_unresolved),
+            (self.show_total_undefined_checkbox, self._saved_show_total_undefined),
+        ):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(value)
+            checkbox.blockSignals(False)
+        self._update_filter_indicator()
+
+    def _save_filter_state(self) -> None:
+        config = load_config()
+        filters = config.get("difficulty_filters")
+        if not isinstance(filters, dict):
+            filters = {}
+        filters["song_query"] = self._song_filter_query
+        filters["conditions"] = [
+            {
+                "column": condition.column,
+                "operator": condition.operator,
+                "value": condition.value,
+                "secondary_value": condition.secondary_value,
+            }
+            for condition in self._filter_conditions[:MAX_FILTER_CONDITIONS]
+        ]
+        filters["level_selection"] = sorted(self._filter_selection)
+        filters["show_unresolved"] = self.show_unresolved_checkbox.isChecked()
+        filters["show_total_undefined"] = self.show_total_undefined_checkbox.isChecked()
+        self._saved_show_unresolved = filters["show_unresolved"]
+        self._saved_show_total_undefined = filters["show_total_undefined"]
+        config["difficulty_filters"] = filters
+        save_config(config)
+
+    def _update_filter_indicator(self) -> None:
+        if self._is_filter_active():
+            self.filter_status_label.setText("フィルター適用中")
+            self.filter_status_label.show()
+        else:
+            self.filter_status_label.hide()
+
+    def _on_visibility_option_changed(self) -> None:
+        self._saved_show_unresolved = self.show_unresolved_checkbox.isChecked()
+        self._saved_show_total_undefined = self.show_total_undefined_checkbox.isChecked()
+        self._save_filter_state()
+        self._render_table_and_chart()
+
+    def _is_filter_active(self) -> bool:
+        has_name_filter = bool(self._song_filter_query.strip())
+        has_conditions = bool(self._active_filter_conditions())
+        has_level_filter = bool(
+            self._available_levels
+            and self._filter_selection
+            and len(self._filter_selection) != len(self._available_levels)
+        )
+        return has_name_filter or has_conditions or has_level_filter
+
+    def _active_filter_conditions(self) -> list[NumericFilterCondition]:
+        active: list[NumericFilterCondition] = []
+        for condition in self._filter_conditions:
+            if not condition.column:
+                continue
+            if condition.operator == "range":
+                if condition.value is None or condition.secondary_value is None:
+                    continue
+            elif condition.value is None:
+                continue
+            active.append(condition)
+        return active
+
+    def _matches_name_filter(self, analysis: ChartAnalysis) -> bool:
+        query = self._song_filter_query.strip().lower()
+        if not query:
+            return True
+        title = analysis.entry.title or analysis.title
+        subtitle = analysis.entry.subtitle or analysis.subtitle or ""
+        searchable = f"{title} {subtitle}".strip().lower()
+        return query in searchable
+
+    def _value_for_filter_column(self, column: str, analysis: ChartAnalysis) -> float | None:
+        if column == "TOTAL値":
+            return analysis.total_value
+        if column == "NOTES数":
+            return float(analysis.note_count or 0)
+        return self._metric_value(analysis, column)
+
+    def _evaluate_condition(self, value: float, condition: NumericFilterCondition) -> bool:
+        if condition.operator == "eq":
+            return condition.value is None or abs(value - condition.value) < 1e-9
+        if condition.operator == "range":
+            if condition.value is None or condition.secondary_value is None:
+                return True
+            low = min(condition.value, condition.secondary_value)
+            high = max(condition.value, condition.secondary_value)
+            return low <= value <= high
+        if condition.operator == "gte":
+            return condition.value is None or value >= condition.value
+        if condition.operator == "lte":
+            return condition.value is None or value <= condition.value
+        if condition.operator == "gt":
+            return condition.value is None or value > condition.value
+        if condition.operator == "lt":
+            return condition.value is None or value < condition.value
+        return True
+
+    def _matches_numeric_filters(self, analysis: ChartAnalysis) -> bool:
+        for condition in self._active_filter_conditions():
+            value = self._value_for_filter_column(condition.column, analysis)  # type: ignore[arg-type]
+            if value is None:
+                return False
+            if not self._evaluate_condition(value, condition):
+                return False
+        return True
+
+    def _passes_resolution_filters(self, analysis: ChartAnalysis) -> bool:
+        if analysis.resolved_path is None:
+            return self.show_unresolved_checkbox.isChecked()
+        if analysis.total_value is None and not self.show_total_undefined_checkbox.isChecked():
+            return False
+        return True
+
+    def _safe_float(self, value: object) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def _open_column_visibility_dialog(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("列表示切替")
@@ -1623,52 +1831,243 @@ class DifficultyTab(QWidget):
     def _open_filter_dialog(self) -> None:
         self._sync_filter_options()
         dialog = QDialog(self)
-        dialog.setWindowTitle("LEVEL を絞り込み")
+        dialog.setWindowTitle("フィルター設定")
         layout = QVBoxLayout(dialog)
 
-        toggle_layout = QHBoxLayout()
-        select_all_btn = QPushButton("すべて選択")
-        clear_all_btn = QPushButton("すべて解除")
-        toggle_layout.addWidget(select_all_btn)
-        toggle_layout.addWidget(clear_all_btn)
-        toggle_layout.addStretch()
-        layout.addLayout(toggle_layout)
+        operator_labels = {op: label for op, label in FILTER_OPERATORS}
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        container = QWidget()
-        container_layout = QVBoxLayout()
-        checkboxes: list[QCheckBox] = []
-        current_selection = self._filter_selection or set(self._available_levels)
-        for level in self._available_levels:
-            cb = QCheckBox(level)
-            cb.setChecked(level in current_selection)
-            container_layout.addWidget(cb)
-            checkboxes.append(cb)
-        container_layout.addStretch()
-        container.setLayout(container_layout)
-        scroll.setWidget(container)
-        layout.addWidget(scroll)
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("曲名検索:"))
+        search_input = QLineEdit()
+        search_input.setPlaceholderText("曲名の一部を入力")
+        search_input.setText(self._song_filter_query)
+        search_layout.addWidget(search_input)
+        layout.addLayout(search_layout)
+
+        layout.addWidget(QLabel("数値条件（最大10行）"))
+        conditions_layout = QVBoxLayout()
+        conditions_layout.setSpacing(6)
+        condition_rows: list["ConditionRow"] = []
+
+        class ConditionRow:
+            def __init__(self, condition: Optional[NumericFilterCondition] = None):
+                self.widget = QWidget()
+                row_layout = QHBoxLayout(self.widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                self.column_combo = QComboBox()
+                self.column_combo.addItem("列を選択", "")
+                for col in FILTERABLE_COLUMNS:
+                    self.column_combo.addItem(col, col)
+                self.operator_combo = QComboBox()
+                for op, label in FILTER_OPERATORS:
+                    self.operator_combo.addItem(label, op)
+                self.single_label = QLabel(operator_labels.get("eq", "＝"))
+                self.single_input = QLineEdit()
+                self.single_input.setPlaceholderText("数値を入力")
+                self.single_input.setValidator(QDoubleValidator(bottom=-1e300, top=1e300, decimals=10))
+                self.range_min_input = QLineEdit()
+                self.range_min_input.setPlaceholderText("最小値")
+                self.range_min_input.setValidator(QDoubleValidator(bottom=-1e300, top=1e300, decimals=10))
+                self.range_label = QLabel("～")
+                self.range_max_input = QLineEdit()
+                self.range_max_input.setPlaceholderText("最大値")
+                self.range_max_input.setValidator(QDoubleValidator(bottom=-1e300, top=1e300, decimals=10))
+                self.delete_button = QPushButton("削除")
+                row_layout.addWidget(self.column_combo)
+                row_layout.addWidget(self.operator_combo)
+                row_layout.addWidget(self.single_label)
+                row_layout.addWidget(self.single_input)
+                row_layout.addWidget(self.range_min_input)
+                row_layout.addWidget(self.range_label)
+                row_layout.addWidget(self.range_max_input)
+                row_layout.addStretch()
+                row_layout.addWidget(self.delete_button)
+                self.widget.setLayout(row_layout)
+                self._set_values(condition or NumericFilterCondition())
+                self.operator_combo.currentIndexChanged.connect(self._refresh_inputs)
+                self._refresh_inputs()
+
+            def _set_values(self, condition: NumericFilterCondition) -> None:
+                column_index = self.column_combo.findData(condition.column or "")
+                self.column_combo.setCurrentIndex(column_index if column_index != -1 else 0)
+                op_index = self.operator_combo.findData(condition.operator)
+                self.operator_combo.setCurrentIndex(op_index if op_index != -1 else 0)
+                self.single_input.setText("" if condition.value is None else str(condition.value))
+                self.range_min_input.setText("" if condition.value is None else str(condition.value))
+                self.range_max_input.setText("" if condition.secondary_value is None else str(condition.secondary_value))
+                self.single_label.setText(operator_labels.get(condition.operator, operator_labels.get("eq", "＝")))
+
+            def _refresh_inputs(self) -> None:
+                operator = self.operator_combo.currentData()
+                use_range = operator == "range"
+                self.single_label.setVisible(not use_range)
+                self.single_input.setVisible(not use_range)
+                self.range_min_input.setVisible(use_range)
+                self.range_label.setVisible(use_range)
+                self.range_max_input.setVisible(use_range)
+                self.single_label.setText(operator_labels.get(operator, operator_labels.get("eq", "＝")))
+
+            def reset(self) -> None:
+                self.column_combo.setCurrentIndex(0)
+                self.operator_combo.setCurrentIndex(0)
+                for edit in (self.single_input, self.range_min_input, self.range_max_input):
+                    edit.clear()
+                self._refresh_inputs()
+
+        def refresh_add_button(add_button: QPushButton) -> None:
+            add_button.setEnabled(len(condition_rows) < MAX_FILTER_CONDITIONS)
+
+        def remove_condition_row(row: ConditionRow, add_button: QPushButton) -> None:
+            if len(condition_rows) == 1:
+                row.reset()
+                return
+            condition_rows.remove(row)
+            row.widget.setParent(None)
+            row.widget.deleteLater()
+            refresh_add_button(add_button)
+
+        def add_condition_row(add_button: QPushButton, condition: Optional[NumericFilterCondition] = None) -> None:
+            if len(condition_rows) >= MAX_FILTER_CONDITIONS:
+                QMessageBox.information(dialog, "上限", f"条件は最大 {MAX_FILTER_CONDITIONS} 行までです")
+                return
+            row = ConditionRow(condition)
+            row.delete_button.clicked.connect(lambda: remove_condition_row(row, add_button))
+            condition_rows.append(row)
+            conditions_layout.addWidget(row.widget)
+            refresh_add_button(add_button)
+
+        add_button = QPushButton("条件を追加")
+        for condition in self._filter_conditions[:MAX_FILTER_CONDITIONS]:
+            add_condition_row(add_button, condition)
+        if not condition_rows:
+            add_condition_row(add_button)
+        layout.addLayout(conditions_layout)
+        layout.addWidget(add_button)
+
+        level_group = QGroupBox("LEVEL 絞り込み")
+        level_layout = QVBoxLayout()
+        level_toggle_row = QHBoxLayout()
+        level_select_all_btn = QPushButton("すべて選択")
+        level_clear_btn = QPushButton("すべて解除")
+        level_toggle_row.addWidget(level_select_all_btn)
+        level_toggle_row.addWidget(level_clear_btn)
+        level_toggle_row.addStretch()
+        level_layout.addLayout(level_toggle_row)
+
+        level_scroll = QScrollArea()
+        level_scroll.setWidgetResizable(True)
+        level_container = QWidget()
+        level_container_layout = QVBoxLayout()
+        level_checkboxes: list[QCheckBox] = []
+        current_levels = self._filter_selection or set(self._available_levels)
+        if self._available_levels:
+            for level in self._available_levels:
+                cb = QCheckBox(level)
+                cb.setChecked(level in current_levels)
+                level_container_layout.addWidget(cb)
+                level_checkboxes.append(cb)
+        else:
+            level_container_layout.addWidget(QLabel("LEVEL 情報がありません"))
+        level_container_layout.addStretch()
+        level_container.setLayout(level_container_layout)
+        level_scroll.setWidget(level_container)
+        level_layout.addWidget(level_scroll)
+        level_group.setLayout(level_layout)
+        layout.addWidget(level_group)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        reset_button = buttons.addButton("リセット", QDialogButtonBox.ButtonRole.ResetRole)
         layout.addWidget(buttons)
 
-        def select_all() -> None:
-            for cb in checkboxes:
+        def select_all_levels() -> None:
+            for cb in level_checkboxes:
                 cb.setChecked(True)
 
-        def clear_all() -> None:
-            for cb in checkboxes:
+        def clear_all_levels() -> None:
+            for cb in level_checkboxes:
                 cb.setChecked(False)
 
-        select_all_btn.clicked.connect(select_all)
-        clear_all_btn.clicked.connect(clear_all)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
+        def reset_filters() -> None:
+            search_input.clear()
+            while len(condition_rows) > 1:
+                remove_condition_row(condition_rows[-1], add_button)
+            if condition_rows:
+                condition_rows[0].reset()
+            select_all_levels()
+            refresh_add_button(add_button)
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._filter_selection = {cb.text() for cb in checkboxes if cb.isChecked()}
+        def collect_conditions() -> Optional[list[NumericFilterCondition]]:
+            collected: list[NumericFilterCondition] = []
+            valid_operators = {op for op, _ in FILTER_OPERATORS}
+            for idx, row in enumerate(condition_rows, start=1):
+                column = row.column_combo.currentData()
+                operator = row.operator_combo.currentData()
+                single_value = row.single_input.text().strip()
+                range_min = row.range_min_input.text().strip()
+                range_max = row.range_max_input.text().strip()
+                has_input = bool(single_value or range_min or range_max)
+                if not column and not has_input:
+                    continue
+                if not column:
+                    QMessageBox.warning(dialog, "列を選択", f"{idx} 行目の列を選択してください")
+                    return None
+                if operator not in valid_operators:
+                    QMessageBox.warning(dialog, "演算子を選択", f"{idx} 行目の演算子を選択してください")
+                    return None
+                if operator == "range":
+                    if not range_min or not range_max:
+                        QMessageBox.warning(dialog, "入力不足", f"{idx} 行目の範囲の両方に数値を入力してください")
+                        return None
+                    min_value = self._safe_float(range_min)
+                    max_value = self._safe_float(range_max)
+                    if min_value is None or max_value is None:
+                        QMessageBox.warning(dialog, "不正な値", f"{idx} 行目の範囲は数値で入力してください")
+                        return None
+                    if min_value > max_value:
+                        QMessageBox.warning(dialog, "範囲を確認", f"{idx} 行目の範囲は小さい値を先に入力してください")
+                        return None
+                    collected.append(
+                        NumericFilterCondition(
+                            column=column,
+                            operator=operator,
+                            value=min_value,
+                            secondary_value=max_value,
+                        )
+                    )
+                    continue
+                if not single_value:
+                    QMessageBox.warning(dialog, "入力不足", f"{idx} 行目の閾値を入力してください")
+                    return None
+                parsed_value = self._safe_float(single_value)
+                if parsed_value is None:
+                    QMessageBox.warning(dialog, "不正な値", f"{idx} 行目の閾値は数値で入力してください")
+                    return None
+                collected.append(NumericFilterCondition(column=column, operator=operator, value=parsed_value))
+            return collected
+
+        def apply_filters() -> None:
+            conditions = collect_conditions()
+            if conditions is None:
+                return
+            selected_levels = {cb.text() for cb in level_checkboxes if cb.isChecked()}
+            if self._available_levels and not selected_levels:
+                QMessageBox.warning(dialog, "LEVEL を選択", "少なくとも1つの LEVEL を選択してください")
+                return
+            self._song_filter_query = search_input.text().strip()
+            self._filter_conditions = conditions if conditions else [NumericFilterCondition()]
+            self._filter_selection = selected_levels or set(self._available_levels)
+            self._save_filter_state()
             self._render_table_and_chart()
+            dialog.accept()
+
+        level_select_all_btn.clicked.connect(select_all_levels)
+        level_clear_btn.clicked.connect(clear_all_levels)
+        add_button.clicked.connect(lambda: add_condition_row(add_button))
+        buttons.accepted.connect(apply_filters)
+        buttons.rejected.connect(dialog.reject)
+        reset_button.clicked.connect(reset_filters)
+
+        dialog.exec()
 
     def _get_column_index(self, header_name: str) -> int | None:
         for idx in range(self.table_widget.columnCount()):
@@ -1717,13 +2116,16 @@ class DifficultyTab(QWidget):
     def _is_chart_visible(self, analysis: ChartAnalysis) -> bool:
         if not self._is_difficulty_visible(analysis.difficulty):
             return False
-        if analysis.resolved_path is None:
-            return self.show_unresolved_checkbox.isChecked()
-        if analysis.total_value is None and not self.show_total_undefined_checkbox.isChecked():
+        if not self._passes_resolution_filters(analysis):
+            return False
+        if not self._matches_name_filter(analysis):
+            return False
+        if not self._matches_numeric_filters(analysis):
             return False
         return True
 
     def _sync_filter_options(self) -> None:
+        previous_selection = set(self._filter_selection)
         self._available_levels = sorted({self._format_difficulty(a.difficulty) for a in self._latest_analyses}, key=difficulty_sort_key)
         available_set = set(self._available_levels)
         if not self._filter_selection:
@@ -1732,16 +2134,31 @@ class DifficultyTab(QWidget):
             self._filter_selection = {level for level in self._filter_selection if level in available_set}
             if not self._filter_selection:
                 self._filter_selection = available_set
+        if self._filter_selection != previous_selection:
+            self._save_filter_state()
+        self._update_filter_indicator()
 
     def _apply_filter_defaults(self) -> None:
         # Ensure all levels are visible after load/switch
         if self._available_levels and not self._filter_selection:
             self._filter_selection = set(self._available_levels)
+        self._update_filter_indicator()
 
     def _visible_level_labels(self) -> list[str]:
         if self._filter_selection:
             return sorted(self._filter_selection, key=difficulty_sort_key)
         return sorted(self._available_levels, key=difficulty_sort_key) if self._available_levels else []
+
+    def _describe_active_conditions(self) -> str:
+        operator_labels = {op: label for op, label in FILTER_OPERATORS}
+        descriptions: list[str] = []
+        for condition in self._active_filter_conditions():
+            symbol = operator_labels.get(condition.operator, condition.operator)
+            if condition.operator == "range" and condition.value is not None and condition.secondary_value is not None:
+                descriptions.append(f"{condition.column}: {condition.value:g} {symbol} {condition.secondary_value:g}")
+            elif condition.value is not None:
+                descriptions.append(f"{condition.column}: {symbol} {condition.value:g}")
+        return "; ".join(descriptions)
 
     def _get_table_display_name(self) -> str:
         if self._current_table_name:
@@ -1762,6 +2179,8 @@ class DifficultyTab(QWidget):
             ["LEVEL 絞り込み", level_text],
             ["未解析譜面", "表示" if self.show_unresolved_checkbox.isChecked() else "非表示"],
             ["TOTAL 未定義", "表示" if self.show_total_undefined_checkbox.isChecked() else "非表示"],
+            ["曲名フィルター", self._song_filter_query or "なし"],
+            ["数値フィルター", self._describe_active_conditions() or "なし"],
         ]
         metadata.append(["表示中の列", ", ".join(headers) if headers else "なし"])
         if table_type == "難易度統計":
@@ -1846,9 +2265,12 @@ class DifficultyTab(QWidget):
         self._write_csv_with_metadata(path, headers, rows, metadata)
 
     def _reset_visibility_toggles(self) -> None:
-        for checkbox in (self.show_unresolved_checkbox, self.show_total_undefined_checkbox):
+        for checkbox, value in (
+            (self.show_unresolved_checkbox, self._saved_show_unresolved),
+            (self.show_total_undefined_checkbox, self._saved_show_total_undefined),
+        ):
             checkbox.blockSignals(True)
-            checkbox.setChecked(False)
+            checkbox.setChecked(value)
             checkbox.blockSignals(False)
 
 
