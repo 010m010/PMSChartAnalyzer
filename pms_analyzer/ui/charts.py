@@ -335,10 +335,11 @@ class StackedDensityChart(FigureCanvasQTAgg):
         return smoothed
 
     def _set_x_limits(self, num_bins: int) -> None:
+        margin = 0.35
         if num_bins <= 0:
-            self._x_limits = (-0.5, 0.5)
+            self._x_limits = (-0.5 - margin, 0.5 + margin)
         else:
-            self._x_limits = (-0.5, num_bins - 0.5)
+            self._x_limits = (-0.5 - margin, num_bins - 0.5 + margin)
         self.ax.set_xlim(self._x_limits)
         self.ax.set_autoscalex_on(False)
 
