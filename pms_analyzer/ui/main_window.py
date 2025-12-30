@@ -2322,7 +2322,7 @@ class MainWindow(QMainWindow):
         self.theme_action_group.triggered.connect(self._on_theme_selected)
 
         help_menu = menu.addMenu("ヘルプ")
-        playground_action = QAction("用語・指標について", self)
+        playground_action = QAction("用語説明", self)
         playground_action.triggered.connect(self._open_playground)
         help_menu.addAction(playground_action)
 
