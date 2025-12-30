@@ -115,6 +115,7 @@ def analyze_table(
                 0.0,
                 0.0,
                 0.0,
+                0.0,
             )
             analyses.append(
                 ChartAnalysis(
