@@ -64,11 +64,13 @@ def compute_density(
         per_second_by_key[index][note.key_index] += 1
 
     per_second_total = [sum(row) for row in per_second_by_key]
+    non_zero_bins = [val for val in per_second_total if val > 0]
     max_density = max(per_second_total)
-    average_density = len(notes) / duration
+    average_density = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
 
     terminal_density = 0.0
     terminal_rms_density = 0.0
+    start_bin = len(per_second_total)
     terminal_window_used: float | None = None
     if total_value and len(notes) > 0:
         gauge_rate = total_value / len(notes)
@@ -83,22 +85,37 @@ def compute_density(
                 terminal_density = len(terminal_notes) / window
             start_bin = min(max(int(max(terminal_start - start_time, 0.0) // bin_size), 0), len(per_second_total))
             terminal_bins = per_second_total[start_bin:] if start_bin < len(per_second_total) else []
-            if terminal_bins:
-                terminal_rms_density = (sum(val * val for val in terminal_bins) / len(terminal_bins)) ** 0.5
+            terminal_bins_non_zero = [val for val in terminal_bins if val > 0]
+            if terminal_bins_non_zero:
+                terminal_rms_density = (
+                    sum(val * val for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                ) ** 0.5
     # Root-mean-square of per-second densities
     rms_density = (
-        (sum(val * val for val in per_second_total) / len(per_second_total)) ** 0.5
-        if per_second_total
+        (sum(val * val for val in non_zero_bins) / len(non_zero_bins)) ** 0.5
+        if non_zero_bins
         else 0.0
     )
 
-    mean_per_second = sum(per_second_total) / len(per_second_total)
-    variance = sum((val - mean_per_second) ** 2 for val in per_second_total) / len(per_second_total)
+    mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
+    variance = (
+        sum((val - mean_per_second) ** 2 for val in non_zero_bins) / len(non_zero_bins)
+        if non_zero_bins
+        else 0.0
+    )
     std_per_second = variance**0.5
+
+    non_terminal_bins = per_second_total[:start_bin]
+    non_terminal_bins_non_zero = [val for val in non_terminal_bins if val > 0]
+    non_terminal_rms = (
+        (sum(val * val for val in non_terminal_bins_non_zero) / len(non_terminal_bins_non_zero)) ** 0.5
+        if non_terminal_bins_non_zero
+        else rms_density
+    )
 
     overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
     terminal_difficulty = (
-        (terminal_rms_density - rms_density) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+        (terminal_rms_density - non_terminal_rms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
     )
     gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
 
