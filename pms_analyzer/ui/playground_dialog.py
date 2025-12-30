@@ -352,7 +352,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
 class PlaygroundDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, *, theme_mode: str = "system") -> None:
         super().__init__(parent)
-        self.setWindowTitle("自由入力プレビュー")
+        self.setWindowTitle("用語・指標について")
         self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.theme_mode = theme_mode
@@ -549,7 +549,7 @@ class PlaygroundDialog(QDialog):
     def _render_chart(self, result: PlaygroundResult) -> None:
         self.chart.plot(
             result.per_second_by_key,
-            title="自由入力プレビュー",
+            title="用語・指標について",
             total_time=result.total_time_for_chart,
             terminal_window=result.terminal_window_for_chart,
             show_smoothed_line=True,
