@@ -333,6 +333,7 @@ class SingleAnalysisTab(QWidget):
             ("range_gauge", "ゲージ増加量"),
             ("range_avg", "平均密度"),
             ("range_rms", "RMS"),
+            ("range_cms", "CMS"),
         ]
         for row, (key, title) in enumerate(range_fields):
             lbl = QLabel(title)
@@ -592,6 +593,7 @@ class SingleAnalysisTab(QWidget):
             "range_gauge": "-",
             "range_avg": "-",
             "range_rms": "-",
+            "range_cms": "-",
         }
         for key, default in defaults.items():
             label = self.range_labels.get(key)
@@ -662,6 +664,8 @@ class SingleAnalysisTab(QWidget):
             self._set_label_text(self.range_labels["range_avg"], f"{stats.average_density:.2f} note/s")
         if "range_rms" in self.range_labels:
             self._set_label_text(self.range_labels["range_rms"], f"{stats.rms_density:.2f} note/s")
+        if "range_cms" in self.range_labels:
+            self._set_label_text(self.range_labels["range_cms"], f"{stats.cms_density:.2f} note/s")
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
