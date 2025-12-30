@@ -58,6 +58,7 @@ from ..storage import (
     SavedDifficultyTable,
     add_saved_table,
     append_history,
+    load_cached_difficulty_data,
     load_cached_difficulty_table,
     get_saved_tables,
     load_config,
@@ -211,6 +212,7 @@ class DifficultyTableWorker(QThread):
         songdata_db: Optional[Path],
         beatoraja_base: Optional[Path],
         cached_table: Optional[DifficultyTable] = None,
+        cached_analyses: Optional[list[ChartAnalysis]] = None,
     ):
         super().__init__()
         self.parser = parser
@@ -219,6 +221,7 @@ class DifficultyTableWorker(QThread):
         self.songdata_db = songdata_db
         self.beatoraja_base = beatoraja_base
         self.cached_table = cached_table
+        self.cached_analyses = cached_analyses
 
     def run(self) -> None:  # type: ignore[override]
         try:
@@ -242,12 +245,16 @@ class DifficultyTableWorker(QThread):
                     suffix,
                     source_url=self.table_source,
                 )
-            analyses = analyze_table(
-                table,
-                self.parser,
-                songdata_db=self.songdata_db,
-                beatoraja_base=self.beatoraja_base,
-            )
+            use_cached = self.cached_analyses is not None and len(self.cached_analyses) == len(table.entries)
+            if use_cached:
+                analyses = self.cached_analyses or []
+            else:
+                analyses = analyze_table(
+                    table,
+                    self.parser,
+                    songdata_db=self.songdata_db,
+                    beatoraja_base=self.beatoraja_base,
+                )
             self.finished.emit(self.table_source, table, analyses)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc())
@@ -1027,7 +1034,7 @@ class DifficultyTab(QWidget):
         self._cached_results[cache_key] = analyses
         self._cached_symbols[cache_key] = table.symbol or ""
         self._cached_table_names[cache_key] = table.name or self._derive_table_name(cache_key)
-        save_cached_difficulty_table(cache_key, table)
+        save_cached_difficulty_table(cache_key, table, analyses)
         if table.name:
             update_saved_table_name(cache_key, table.name)
 
@@ -1052,14 +1059,18 @@ class DifficultyTab(QWidget):
         saved_entry = next((table for table in self._saved_tables if table.url == url), None)
         fallback_name = Path(url).stem or url or "table"
         cached_table: DifficultyTable | None = None
+        cached_analyses: list[ChartAnalysis] | None = None
         if not force_refresh:
-            cached_table = load_cached_difficulty_table(url)
-            if cached_table and cached_table.name:
-                fallback_name = cached_table.name
+            cached_data = load_cached_difficulty_data(url)
+            if cached_data:
+                cached_table = cached_data.table
+                cached_analyses = cached_data.analyses or None
+                if cached_table.name:
+                    fallback_name = cached_table.name
         name = (saved_entry.name if saved_entry and saved_entry.name else None) or fallback_name
         self.analyze_button.setEnabled(False)
         self.load_button.setEnabled(False)
-        if cached_table is not None:
+        if cached_table is not None and cached_analyses:
             self.loading_label.setText("保存済みデータから解析中です。数分かかる場合があります...")
         else:
             self.loading_label.setText("読み込み/解析中です。数分かかる場合があります...")
@@ -1090,6 +1101,7 @@ class DifficultyTab(QWidget):
             songdata_db=songdata_db,
             beatoraja_base=songdata_dir,
             cached_table=cached_table,
+            cached_analyses=cached_analyses,
         )
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
@@ -1151,8 +1163,21 @@ class DifficultyTab(QWidget):
             self._sync_filter_options()
             self._apply_filter_defaults()
         else:
-            cached_table = load_cached_difficulty_table(url)
-            if cached_table:
+            cached_data = load_cached_difficulty_data(url)
+            if cached_data and cached_data.analyses:
+                self._cached_results[url] = cached_data.analyses
+                if cached_data.table.name:
+                    self._cached_table_names.setdefault(url, cached_data.table.name)
+                    self._current_table_name = cached_data.table.name
+                self._cached_symbols[url] = cached_data.table.symbol or ""
+                self._latest_analyses = cached_data.analyses
+                self._current_symbol = self._cached_symbols.get(url, "")
+                self._reset_visibility_toggles()
+                self._render_table_and_chart()
+                self._reset_sorting_safe()
+                self._sync_filter_options()
+                self._apply_filter_defaults()
+            elif cached_data:
                 self._start_download(url, add_to_saved=False, force_refresh=False)
             else:
                 self._latest_analyses = []

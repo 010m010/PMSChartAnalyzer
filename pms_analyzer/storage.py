@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .analysis import DensityResult
-from .difficulty_table import DifficultyEntry, DifficultyTable
+from .difficulty_table import ChartAnalysis, DifficultyEntry, DifficultyTable
 
 CONFIG_DIR = Path.home() / ".pms_chart_analyzer"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -41,6 +41,12 @@ def save_config(config: Dict[str, object]) -> None:
 class SavedDifficultyTable:
     url: str
     name: Optional[str] = None
+
+
+@dataclass
+class CachedDifficultyData:
+    table: DifficultyTable
+    analyses: list[ChartAnalysis]
 
 
 def _normalize_saved_tables(config: Dict[str, object]) -> list[SavedDifficultyTable]:
@@ -163,7 +169,127 @@ def _load_cached_tables() -> Dict[str, object]:
     return {}
 
 
-def save_cached_difficulty_table(url: str, table: DifficultyTable) -> None:
+def _density_to_dict(density: DensityResult) -> dict[str, object]:
+    return {
+        "per_second_total": density.per_second_total,
+        "per_second_by_key": density.per_second_by_key,
+        "max_density": density.max_density,
+        "average_density": density.average_density,
+        "cms_density": density.cms_density,
+        "chm_density": density.chm_density,
+        "terminal_density": density.terminal_density,
+        "terminal_rms_density": density.terminal_rms_density,
+        "terminal_cms_density": density.terminal_cms_density,
+        "terminal_chm_density": density.terminal_chm_density,
+        "rms_density": density.rms_density,
+        "duration": density.duration,
+        "terminal_window": density.terminal_window,
+        "overall_difficulty": density.overall_difficulty,
+        "terminal_difficulty": density.terminal_difficulty,
+        "terminal_difficulty_cms": density.terminal_difficulty_cms,
+        "terminal_difficulty_chm": density.terminal_difficulty_chm,
+        "terminal_density_difference": density.terminal_density_difference,
+        "gustiness": density.gustiness,
+        "terminal_gustiness": density.terminal_gustiness,
+    }
+
+
+def _density_from_dict(data: object) -> Optional[DensityResult]:
+    if not isinstance(data, dict):
+        return None
+    try:
+        per_second_total = [int(v) for v in data.get("per_second_total", []) or []]
+        per_second_by_key = [[int(v) for v in row] for row in data.get("per_second_by_key", []) or []]
+        return DensityResult(
+            per_second_total=per_second_total,
+            per_second_by_key=per_second_by_key,
+            max_density=float(data.get("max_density", 0.0)),
+            average_density=float(data.get("average_density", 0.0)),
+            cms_density=float(data.get("cms_density", 0.0)),
+            chm_density=float(data.get("chm_density", 0.0)),
+            terminal_density=float(data.get("terminal_density", 0.0)),
+            terminal_rms_density=float(data.get("terminal_rms_density", 0.0)),
+            terminal_cms_density=float(data.get("terminal_cms_density", 0.0)),
+            terminal_chm_density=float(data.get("terminal_chm_density", 0.0)),
+            rms_density=float(data.get("rms_density", 0.0)),
+            duration=float(data.get("duration", 0.0)),
+            terminal_window=float(data["terminal_window"]) if data.get("terminal_window") is not None else None,
+            overall_difficulty=float(data.get("overall_difficulty", 0.0)),
+            terminal_difficulty=float(data.get("terminal_difficulty", 0.0)),
+            terminal_difficulty_cms=float(data.get("terminal_difficulty_cms", 0.0)),
+            terminal_difficulty_chm=float(data.get("terminal_difficulty_chm", 0.0)),
+            terminal_density_difference=float(data.get("terminal_density_difference", 0.0)),
+            gustiness=float(data.get("gustiness", 0.0)),
+            terminal_gustiness=float(data.get("terminal_gustiness", 0.0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_analysis(analysis: ChartAnalysis, index: int) -> dict[str, object]:
+    return {
+        "entry_index": index,
+        "difficulty": analysis.difficulty,
+        "title": analysis.title,
+        "subtitle": analysis.subtitle,
+        "md5": analysis.md5,
+        "sha256": analysis.sha256,
+        "note_count": analysis.note_count,
+        "total_value": analysis.total_value,
+        "resolved_path": str(analysis.resolved_path) if analysis.resolved_path else None,
+        "density": _density_to_dict(analysis.density),
+    }
+
+
+def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyEntry]) -> list[ChartAnalysis]:
+    if not isinstance(raw_analyses, list):
+        return []
+    analyses: list[ChartAnalysis] = []
+    for item in raw_analyses:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("entry_index"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= index < len(entries):
+            continue
+        density = _density_from_dict(item.get("density"))
+        if density is None:
+            continue
+        entry = entries[index]
+        resolved_raw = item.get("resolved_path")
+        resolved_path = Path(str(resolved_raw)) if resolved_raw else None
+        note_count = item.get("note_count")
+        total_value = item.get("total_value")
+        try:
+            note_count_val: int = int(note_count) if note_count is not None else 0
+        except (TypeError, ValueError):
+            note_count_val = 0
+        try:
+            total_value_val: Optional[float] = float(total_value) if total_value is not None else None
+        except (TypeError, ValueError):
+            total_value_val = None
+        entry.note_count = entry.note_count or note_count_val
+        entry.total_value = entry.total_value or total_value_val
+        analyses.append(
+            ChartAnalysis(
+                difficulty=str(item.get("difficulty") or entry.difficulty),
+                density=density,
+                entry=entry,
+                resolved_path=resolved_path,
+                note_count=note_count_val,
+                total_value=total_value_val,
+                title=str(item.get("title") or entry.title),
+                subtitle=item.get("subtitle") or entry.subtitle,
+                md5=item.get("md5") or entry.md5,
+                sha256=item.get("sha256") or entry.sha256,
+            )
+        )
+    return analyses
+
+
+def save_cached_difficulty_table(url: str, table: DifficultyTable, analyses: list[ChartAnalysis] | None = None) -> None:
     ensure_config_dir()
     cache = _load_cached_tables()
     entries: list[dict[str, object | None]] = []
@@ -181,11 +307,14 @@ def save_cached_difficulty_table(url: str, table: DifficultyTable) -> None:
                 "note_count": entry.note_count,
             }
         )
-    cache[url] = {"name": table.name, "symbol": table.symbol, "entries": entries}
+    analyses_payload = []
+    for idx, analysis in enumerate(analyses or []):
+        analyses_payload.append(_serialize_analysis(analysis, idx))
+    cache[url] = {"name": table.name, "symbol": table.symbol, "entries": entries, "analyses": analyses_payload}
     DIFFICULTY_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_cached_difficulty_table(url: str) -> Optional[DifficultyTable]:
+def load_cached_difficulty_data(url: str) -> Optional[CachedDifficultyData]:
     cache = _load_cached_tables()
     raw_table = cache.get(url)
     if not isinstance(raw_table, dict):
@@ -224,7 +353,13 @@ def load_cached_difficulty_table(url: str) -> Optional[DifficultyTable]:
         )
     name = raw_table.get("name") or Path(url).stem or "table"
     symbol = raw_table.get("symbol") if isinstance(raw_table.get("symbol"), str) else None
-    return DifficultyTable(name=name, entries=entries, symbol=symbol)
+    analyses = _deserialize_cached_analyses(raw_table.get("analyses"), entries)
+    return CachedDifficultyData(table=DifficultyTable(name=name, entries=entries, symbol=symbol), analyses=analyses)
+
+
+def load_cached_difficulty_table(url: str) -> Optional[DifficultyTable]:
+    cached = load_cached_difficulty_data(url)
+    return cached.table if cached else None
 
 
 def remove_cached_difficulty_table(url: str) -> None:
@@ -242,6 +377,7 @@ __all__ = [
     "load_config",
     "save_config",
     "SavedDifficultyTable",
+    "CachedDifficultyData",
     "history_by_difficulty",
     "ensure_config_dir",
     "get_saved_tables",
@@ -251,4 +387,5 @@ __all__ = [
     "save_cached_difficulty_table",
     "load_cached_difficulty_table",
     "remove_cached_difficulty_table",
+    "load_cached_difficulty_data",
 ]
