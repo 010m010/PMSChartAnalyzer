@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -58,6 +60,7 @@ from ..storage import (
     SavedDifficultyTable,
     add_saved_table,
     append_history,
+    load_history,
     load_cached_difficulty_data,
     load_cached_difficulty_table,
     get_saved_tables,
@@ -279,6 +282,7 @@ class SingleAnalysisTab(QWidget):
         )
         self.file_label.setOpenExternalLinks(False)
         self.analyze_button = QPushButton("ファイルを開く")
+        self.history_button = QPushButton("履歴")
         self._single_result_callback: Optional[callable[[str, DensityResult, int, Optional[float]], None]] = None
         self._worker: Optional[AnalysisWorker] = None
         self._current_path: Optional[Path] = None
@@ -302,6 +306,7 @@ class SingleAnalysisTab(QWidget):
 
         file_layout = QHBoxLayout()
         file_layout.addWidget(self.analyze_button)
+        file_layout.addWidget(self.history_button)
         file_layout.addWidget(QLabel("選択ファイル:"))
         self.file_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.file_label.setMinimumWidth(0)
@@ -421,6 +426,7 @@ class SingleAnalysisTab(QWidget):
 
         self._update_file_label(None)
         self.analyze_button.clicked.connect(self._open_file_dialog)
+        self.history_button.clicked.connect(self._show_history_dialog)
         self.line_toggle_checkbox.toggled.connect(self._on_toggle_smoothed_line)
         self.file_label.linkActivated.connect(self._open_current_folder)
         self.chart.set_selection_callback(self._on_range_selected)
@@ -454,6 +460,58 @@ class SingleAnalysisTab(QWidget):
         file_name, _ = QFileDialog.getOpenFileName(self, "PMS ファイルを開く", "", "PMS Files (*.pms *.bms)")
         if file_name:
             self.load_file(Path(file_name))
+
+    def _show_history_dialog(self) -> None:
+        history = load_history().get("records", [])
+        if not history:
+            QMessageBox.information(self, "履歴", "履歴がありません")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("履歴")
+        dialog_layout = QVBoxLayout(dialog)
+
+        list_widget = QListWidget(dialog)
+        list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        list_widget.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        list_widget.setMinimumWidth(400)
+        list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        recent_records = list(reversed(history[-100:]))
+        for item in recent_records:
+            if not isinstance(item, dict):
+                continue
+            file_path = item.get("file_path")
+            if not isinstance(file_path, str):
+                continue
+            title = item.get("title") if isinstance(item.get("title"), str) else None
+            display_text = title or Path(file_path).name
+            list_item = QListWidgetItem(display_text)
+            list_item.setData(Qt.ItemDataRole.UserRole, file_path)
+            list_item.setToolTip(file_path)
+            list_widget.addItem(list_item)
+
+        if list_widget.count() == 0:
+            QMessageBox.information(self, "履歴", "表示できる履歴がありません")
+            return
+
+        def _on_item_clicked(item: QListWidgetItem) -> None:
+            path_str = item.data(Qt.ItemDataRole.UserRole)
+            if not path_str:
+                return
+            path = Path(str(path_str))
+            if not path.exists():
+                QMessageBox.warning(self, "ファイルを開けません", f"ファイルが見つかりません:\n{path}")
+                return
+            dialog.accept()
+            self.load_file(path)
+
+        list_widget.itemClicked.connect(_on_item_clicked)
+
+        dialog_layout.addWidget(list_widget)
+        dialog.setLayout(dialog_layout)
+        dialog.resize(480, 520)
+        dialog.exec()
 
     def load_file(self, path: Path) -> None:
         self._current_path = path
