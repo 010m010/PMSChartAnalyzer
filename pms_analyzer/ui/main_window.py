@@ -227,14 +227,24 @@ class SingleAnalysisTab(QWidget):
     def set_single_result_handler(self, handler: callable[[str, DensityResult, int, Optional[float]], None]) -> None:
         self._single_result_callback = handler
 
+    def _create_value_label(self) -> QLabel:
+        label = QLabel("-")
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setWordWrap(False)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        label.setMinimumWidth(0)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setToolTip("-")
+        return label
+
     def _build_ui(self) -> None:
         main_layout = QVBoxLayout()
 
         file_layout = QHBoxLayout()
         file_layout.addWidget(self.analyze_button)
         file_layout.addWidget(QLabel("選択ファイル:"))
-        self.file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.file_label.setMinimumWidth(200)
+        self.file_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.file_label.setMinimumWidth(0)
         file_layout.addWidget(self.file_label, 1)
         main_layout.addLayout(file_layout)
 
@@ -276,19 +286,12 @@ class SingleAnalysisTab(QWidget):
             lbl = QLabel(label)
             lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             info_grid.addWidget(lbl, row, 0)
-            value_label = QLabel("-")
-            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setWordWrap(False)
-            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            value_label.setToolTip("-")
+            value_label = self._create_value_label()
             self.info_labels[key] = value_label
             info_grid.addWidget(value_label, row, 1)
         info_grid.setHorizontalSpacing(6)
-        info_grid.setColumnMinimumWidth(0, 100)
-        info_grid.setColumnMinimumWidth(1, 200)
         info_grid.setColumnStretch(0, 0)
-        info_grid.setColumnStretch(1, 0)
+        info_grid.setColumnStretch(1, 1)
         info_group.setLayout(info_grid)
 
         metrics_group = QGroupBox("密度メトリクス")
@@ -311,18 +314,12 @@ class SingleAnalysisTab(QWidget):
             lbl = QLabel(title)
             lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(lbl, row, 0)
-            value_label = QLabel("-")
-            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setWordWrap(False)
-            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            value_label.setToolTip("-")
+            value_label = self._create_value_label()
             self.metrics_labels[key] = value_label
             grid.addWidget(value_label, row, 1)
         grid.setHorizontalSpacing(6)
-        grid.setColumnMinimumWidth(0, 150)
-        grid.setColumnMinimumWidth(1, 150)
         grid.setColumnStretch(0, 0)
-        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(1, 1)
         metrics_group.setLayout(grid)
 
         range_group = QGroupBox("選択範囲の統計")
@@ -339,18 +336,12 @@ class SingleAnalysisTab(QWidget):
             lbl = QLabel(title)
             lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             range_grid.addWidget(lbl, row, 0)
-            value_label = QLabel("-")
-            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            value_label.setWordWrap(False)
-            value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            value_label.setToolTip("-")
+            value_label = self._create_value_label()
             self.range_labels[key] = value_label
             range_grid.addWidget(value_label, row, 1)
         range_grid.setHorizontalSpacing(6)
-        range_grid.setColumnMinimumWidth(0, 150)
-        range_grid.setColumnMinimumWidth(1, 150)
         range_grid.setColumnStretch(0, 0)
-        range_grid.setColumnStretch(1, 0)
+        range_grid.setColumnStretch(1, 1)
         range_group.setLayout(range_grid)
 
         details_layout = QHBoxLayout()
