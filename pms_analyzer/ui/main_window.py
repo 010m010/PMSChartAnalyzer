@@ -68,6 +68,7 @@ from ..storage import (
     update_saved_table_name,
 )
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
+from .playground_dialog import PlaygroundDialog
 
 
 def _metric_color(metric_key: str, value: float | None) -> QColor | None:
@@ -2282,6 +2283,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.parser = PMSParser()
         self.theme_mode = "system"
+        self.playground_dialog: PlaygroundDialog | None = None
         self.tabs = QTabWidget()
         self.tabs.setAcceptDrops(True)
         self.tabs.installEventFilter(self)
@@ -2302,6 +2304,11 @@ class MainWindow(QMainWindow):
         open_action = QAction("PMS ファイルを開く", self)
         open_action.triggered.connect(self.single_tab._open_file_dialog)
         file_menu.addAction(open_action)
+
+        tools_menu = menu.addMenu("ツール")
+        playground_action = QAction("自由入力プレビューを開く", self)
+        playground_action.triggered.connect(lambda: self._open_playground(playground_action))
+        tools_menu.addAction(playground_action)
 
         settings_menu = menu.addMenu("設定")
         set_path_action = QAction("songdata.db パスを指定", self)
@@ -2326,6 +2333,8 @@ class MainWindow(QMainWindow):
             apply_app_palette(app, mode)
         self.single_tab.set_theme_mode(mode)
         self.table_tab.set_theme_mode(mode)
+        if self.playground_dialog:
+            self.playground_dialog.set_theme_mode(mode)
         if save:
             config = load_config()
             config["theme_mode"] = mode
@@ -2390,9 +2399,29 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.single_tab)
         self.single_tab.load_file(path)
 
+    def _open_playground(self, action: QAction) -> None:
+        if self.playground_dialog and not self.playground_dialog.isHidden():
+            self.playground_dialog.show()
+            self.playground_dialog.raise_()
+            self.playground_dialog.activateWindow()
+            self.playground_dialog.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+            return
+        self.playground_dialog = PlaygroundDialog(self, theme_mode=self.theme_mode)
+        self.playground_dialog.finished.connect(lambda _: action.setFocus())
+        self.playground_dialog.show()
+
     def _refresh_songdata_label(self) -> None:
         # Backward compatibility: call the public method used by MainWindow
         self.refresh_songdata_label()
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self.playground_dialog:
+            try:
+                self.playground_dialog.close()
+            except Exception:
+                pass
+            self.playground_dialog = None
+        super().closeEvent(event)
 
 
 def run_app() -> None:
