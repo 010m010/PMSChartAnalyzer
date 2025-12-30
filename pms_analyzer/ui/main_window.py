@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import html
 import traceback
 from pathlib import Path
@@ -688,41 +689,42 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 20)
-        self.table_widget.setHorizontalHeaderLabels(
-            [
-                "LEVEL",
-                "曲名",
-                "NOTES数",
-                "TOTAL値",
-                "増加率",
-                "最大瞬間密度",
-                "平均密度",
-                "RMS",
-                "CMS",
-                "CMS/RMS",
-                "終端密度",
-                "終端RMS",
-                "終端CMS",
-                "全体難度数",
-                "終端難度数",
-                "終端難度数（CMS）",
-                "突風度数",
-                "md5",
-                "sha256",
-                "Path",
-            ]
-        )
+        self._table_headers = [
+            "LEVEL",
+            "曲名",
+            "NOTES数",
+            "TOTAL値",
+            "増加率",
+            "最大瞬間密度",
+            "平均密度",
+            "RMS",
+            "CMS",
+            "CMS/RMS",
+            "終端密度",
+            "終端RMS",
+            "終端CMS",
+            "全体難度数",
+            "終端難度数",
+            "終端難度数（CMS）",
+            "突風度数",
+            "md5",
+            "sha256",
+            "Path",
+        ]
+        self.table_widget = QTableWidget(0, len(self._table_headers))
+        self.table_widget.setHorizontalHeaderLabels(self._table_headers)
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_widget.setSortingEnabled(True)
         header = self.table_widget.horizontalHeader()
         header.setSortIndicatorShown(True)
         header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
         header.setSectionsClickable(True)
+        self._apply_preferred_column_widths()
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         v_header = self.table_widget.verticalHeader()
         v_header.setDefaultSectionSize(20)
         v_header.setMinimumSectionSize(18)
+        self.column_visibility_button = QPushButton("列表示切替")
         self.load_button = QPushButton("読み込む")
         self.analyze_button = QPushButton("更新")
         self.delete_button = QPushButton("削除")
@@ -789,6 +791,8 @@ class DifficultyTab(QWidget):
         summary_v_header = self.summary_table.verticalHeader()
         summary_v_header.setDefaultSectionSize(20)
         summary_v_header.setMinimumSectionSize(18)
+        self.export_table_button = QPushButton("CSV出力")
+        self.export_summary_button = QPushButton("CSV出力")
         self.songdata_label = QLabel("songdata.db: 未設定")
         self.single_overlay_checkbox = QCheckBox("単曲分析の値を表示")
         self.single_overlay_checkbox.setChecked(True)
@@ -799,11 +803,14 @@ class DifficultyTab(QWidget):
         self._latest_analyses: List[ChartAnalysis] = []
         self._cached_results: Dict[str, List[ChartAnalysis]] = {}
         self._cached_symbols: Dict[str, str] = {}
+        self._cached_table_names: Dict[str, str] = {}
+        self._current_table_name: Optional[str] = None
         self._current_symbol: str = ""
         self._current_url: Optional[str] = None
         self._saved_tables: list[SavedDifficultyTable] = []
         self._worker: Optional[DifficultyTableWorker] = None
         self._open_single_callback: Optional[callable[[Path], None]] = None
+        self._column_visibility: dict[str, bool] = {label: True for label in self._table_headers}
         self._build_ui()
         self._available_levels: list[str] = []
 
@@ -818,6 +825,19 @@ class DifficultyTab(QWidget):
         self._single_overlay_note_count = note_count
         self._single_overlay_total_value = total_value
         self._refresh_chart_only()
+
+    def _derive_table_name(self, source: Optional[str]) -> str:
+        if not source:
+            return "table"
+        if "://" in source:
+            qurl = QUrl(source)
+            filename = qurl.fileName()
+            if filename:
+                stem = Path(filename).stem
+                return stem or filename
+            path = Path(qurl.path())
+            return path.stem or source
+        return Path(source).stem or source
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
@@ -876,9 +896,11 @@ class DifficultyTab(QWidget):
         table_tab_layout = QVBoxLayout()
         table_tab_layout.setContentsMargins(0, 0, 0, 0)
         visibility_layout = QHBoxLayout()
+        visibility_layout.addWidget(self.column_visibility_button)
         visibility_layout.addWidget(self.show_unresolved_checkbox)
         visibility_layout.addWidget(self.show_total_undefined_checkbox)
         visibility_layout.addStretch()
+        visibility_layout.addWidget(self.export_table_button)
         table_tab_layout.addLayout(visibility_layout)
         table_tab_layout.addWidget(self.table_widget)
         table_tab.setLayout(table_tab_layout)
@@ -890,6 +912,7 @@ class DifficultyTab(QWidget):
         summary_header.addWidget(QLabel("項目:"))
         summary_header.addWidget(self.summary_metric_selector)
         summary_header.addStretch()
+        summary_header.addWidget(self.export_summary_button)
         summary_layout.addLayout(summary_header)
         summary_layout.addWidget(self.summary_table)
         summary_tab.setLayout(summary_layout)
@@ -921,6 +944,10 @@ class DifficultyTab(QWidget):
         self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
         self.show_unresolved_checkbox.toggled.connect(self._render_table_and_chart)
         self.show_total_undefined_checkbox.toggled.connect(self._render_table_and_chart)
+        self.column_visibility_button.clicked.connect(self._open_column_visibility_dialog)
+        self.export_table_button.clicked.connect(self._export_table_csv)
+        self.export_summary_button.clicked.connect(self._export_summary_csv)
+        self._apply_column_visibility()
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -948,6 +975,7 @@ class DifficultyTab(QWidget):
         cache_key = url or ""
         self._cached_results[cache_key] = analyses
         self._cached_symbols[cache_key] = table.symbol or ""
+        self._cached_table_names[cache_key] = table.name or self._derive_table_name(cache_key)
         if table.name:
             update_saved_table_name(cache_key, table.name)
 
@@ -956,6 +984,7 @@ class DifficultyTab(QWidget):
             self._current_url = cache_key
             self._latest_analyses = analyses
             self._current_symbol = table.symbol or ""
+            self._current_table_name = self._cached_table_names.get(cache_key) or self._derive_table_name(cache_key)
             self._reset_visibility_toggles()
             self._render_table_and_chart()
         self.loading_label.setText("")
@@ -1016,6 +1045,8 @@ class DifficultyTab(QWidget):
         self._saved_tables = get_saved_tables()
         for table in self._saved_tables:
             display = table.name or table.url
+            if table.name:
+                self._cached_table_names.setdefault(table.url, table.name)
             self.url_list.addItem(display, table.url)
         target_index = 0
         if keep_url:
@@ -1039,6 +1070,7 @@ class DifficultyTab(QWidget):
             self._render_table_and_chart()
 
     def _load_cached_for_url(self, url: str) -> None:
+        self._current_table_name = self._cached_table_names.get(url) or self._derive_table_name(url)
         if url in self._cached_results:
             self._latest_analyses = self._cached_results[url]
             self._current_symbol = self._cached_symbols.get(url, "")
@@ -1214,6 +1246,7 @@ class DifficultyTab(QWidget):
         else:
             # Default sort by LEVEL using numeric key
             self.table_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self._apply_column_visibility()
         self._render_chart()
         self._render_summary()
 
@@ -1503,6 +1536,84 @@ class DifficultyTab(QWidget):
         self._manual_y_max = None
         self._refresh_chart_only()
 
+    def _apply_preferred_column_widths(self) -> None:
+        header = self.table_widget.horizontalHeader()
+        base_width = header.defaultSectionSize() or 100
+        compact_width = max(50, int(base_width * 0.6))
+        wide_width = int(base_width * 2)
+        width_overrides = {
+            "LEVEL": compact_width,
+            "NOTES数": compact_width,
+            "TOTAL値": compact_width,
+            "増加率": compact_width,
+            "曲名": wide_width,
+        }
+        for idx, label in enumerate(self._table_headers):
+            if label in width_overrides:
+                self.table_widget.setColumnWidth(idx, width_overrides[label])
+
+    def _apply_column_visibility(self) -> None:
+        header = self.table_widget.horizontalHeader()
+        for idx, label in enumerate(self._table_headers):
+            hidden = not self._column_visibility.get(label, True)
+            header.setSectionHidden(idx, hidden)
+
+    def _open_column_visibility_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("列表示切替")
+        layout = QVBoxLayout(dialog)
+
+        toggle_layout = QHBoxLayout()
+        select_all_btn = QPushButton("すべて表示")
+        clear_all_btn = QPushButton("すべて非表示")
+        toggle_layout.addWidget(select_all_btn)
+        toggle_layout.addWidget(clear_all_btn)
+        toggle_layout.addStretch()
+        layout.addLayout(toggle_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        container_layout = QVBoxLayout()
+        checkboxes: list[QCheckBox] = []
+        for label in self._table_headers:
+            cb = QCheckBox(label)
+            cb.setChecked(self._column_visibility.get(label, True))
+            container_layout.addWidget(cb)
+            checkboxes.append(cb)
+        container_layout.addStretch()
+        container.setLayout(container_layout)
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(buttons)
+
+        def select_all() -> None:
+            for cb in checkboxes:
+                cb.setChecked(True)
+
+        def clear_all() -> None:
+            for cb in checkboxes:
+                cb.setChecked(False)
+
+        def apply_selection() -> None:
+            selected = {cb.text() for cb in checkboxes if cb.isChecked()}
+            if not selected:
+                QMessageBox.warning(self, "列を選択", "少なくとも1列を表示してください")
+                return
+            self._column_visibility = {label: label in selected for label in self._table_headers}
+            self._apply_column_visibility()
+            self._apply_preferred_column_widths()
+            dialog.accept()
+
+        select_all_btn.clicked.connect(select_all)
+        clear_all_btn.clicked.connect(clear_all)
+        buttons.accepted.connect(apply_selection)
+        buttons.rejected.connect(dialog.reject)
+
+        dialog.exec()
+
     def _open_filter_dialog(self) -> None:
         self._sync_filter_options()
         dialog = QDialog(self)
@@ -1620,6 +1731,113 @@ class DifficultyTab(QWidget):
         # Ensure all levels are visible after load/switch
         if self._available_levels and not self._filter_selection:
             self._filter_selection = set(self._available_levels)
+
+    def _visible_level_labels(self) -> list[str]:
+        if self._filter_selection:
+            return sorted(self._filter_selection, key=difficulty_sort_key)
+        return sorted(self._available_levels, key=difficulty_sort_key) if self._available_levels else []
+
+    def _get_table_display_name(self) -> str:
+        if self._current_table_name:
+            return self._current_table_name
+        if self._current_url:
+            return self._cached_table_names.get(self._current_url) or self._derive_table_name(self._current_url)
+        return "table"
+
+    def _default_export_filename(self, table_type: str) -> str:
+        name = self._get_table_display_name()
+        return f"{name}_{table_type}.csv"
+
+    def _build_common_metadata(self, table_type: str, headers: list[str]) -> list[list[str]]:
+        level_text = ", ".join(self._visible_level_labels()) or "すべて"
+        metadata = [
+            ["難易度表", self._get_table_display_name()],
+            ["表タイプ", table_type],
+            ["LEVEL 絞り込み", level_text],
+            ["未解析譜面", "表示" if self.show_unresolved_checkbox.isChecked() else "非表示"],
+            ["TOTAL 未定義", "表示" if self.show_total_undefined_checkbox.isChecked() else "非表示"],
+        ]
+        metadata.append(["表示中の列", ", ".join(headers) if headers else "なし"])
+        if table_type == "難易度統計":
+            metadata.append(["集計項目", self.summary_metric_selector.currentText()])
+        return metadata
+
+    def _write_csv_with_metadata(self, path: Path, headers: list[str], rows: list[list[str]], metadata: list[list[str]]) -> None:
+        try:
+            with path.open("w", encoding="utf-8-sig", newline="") as fp:
+                writer = csv.writer(fp)
+                for meta_row in metadata:
+                    writer.writerow(meta_row)
+                writer.writerow([])
+                writer.writerow(headers)
+                writer.writerows(rows)
+            QMessageBox.information(self, "CSV 出力", f"CSV を保存しました: {path}")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "CSV 出力失敗", f"CSV の保存に失敗しました: {exc}")
+
+    def _export_table_csv(self) -> None:
+        if not self._latest_analyses:
+            QMessageBox.information(self, "出力対象なし", "先に難易度表を読み込んでください")
+            return
+        visible_columns = [idx for idx in range(self.table_widget.columnCount()) if not self.table_widget.isColumnHidden(idx)]
+        headers = [
+            self.table_widget.horizontalHeaderItem(idx).text() if self.table_widget.horizontalHeaderItem(idx) else str(idx)
+            for idx in visible_columns
+        ]
+        if not headers:
+            QMessageBox.warning(self, "出力対象なし", "表示中の列がありません")
+            return
+        if self.table_widget.rowCount() == 0:
+            QMessageBox.information(self, "出力対象なし", "表示対象の譜面がありません")
+            return
+        default_name = self._default_export_filename("譜面一覧")
+        path_str, _ = QFileDialog.getSaveFileName(self, "譜面一覧をCSV出力", default_name, "CSV Files (*.csv)")
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.suffix.lower() != ".csv":
+            path = path.with_suffix(".csv")
+
+        rows: list[list[str]] = []
+        for row_idx in range(self.table_widget.rowCount()):
+            row_values: list[str] = []
+            for col_idx in visible_columns:
+                item = self.table_widget.item(row_idx, col_idx)
+                row_values.append(item.text() if item else "")
+            rows.append(row_values)
+
+        metadata = self._build_common_metadata("譜面一覧", headers)
+        self._write_csv_with_metadata(path, headers, rows, metadata)
+
+    def _export_summary_csv(self) -> None:
+        headers = [
+            self.summary_table.horizontalHeaderItem(idx).text() if self.summary_table.horizontalHeaderItem(idx) else str(idx)
+            for idx in range(self.summary_table.columnCount())
+        ]
+        if not headers:
+            QMessageBox.warning(self, "出力対象なし", "難易度統計の列が取得できませんでした")
+            return
+        if self.summary_table.rowCount() == 0:
+            QMessageBox.information(self, "出力対象なし", "表示対象の統計がありません")
+            return
+        default_name = self._default_export_filename("難易度統計")
+        path_str, _ = QFileDialog.getSaveFileName(self, "難易度統計をCSV出力", default_name, "CSV Files (*.csv)")
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.suffix.lower() != ".csv":
+            path = path.with_suffix(".csv")
+
+        rows: list[list[str]] = []
+        for row_idx in range(self.summary_table.rowCount()):
+            row_values: list[str] = []
+            for col_idx in range(self.summary_table.columnCount()):
+                item = self.summary_table.item(row_idx, col_idx)
+                row_values.append(item.text() if item else "")
+            rows.append(row_values)
+
+        metadata = self._build_common_metadata("難易度統計", headers)
+        self._write_csv_with_metadata(path, headers, rows, metadata)
 
     def _reset_visibility_toggles(self) -> None:
         for checkbox in (self.show_unresolved_checkbox, self.show_total_undefined_checkbox):
