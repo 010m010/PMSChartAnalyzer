@@ -26,6 +26,12 @@ class DensityResult:
     terminal_difficulty_cms: float
     gustiness: float
 
+    @property
+    def cms_rms_ratio(self) -> float | None:
+        if self.rms_density == 0:
+            return None
+        return self.cms_density / self.rms_density
+
 
 def compute_density(
     notes: Sequence[Note],
