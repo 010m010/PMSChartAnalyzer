@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from math import ceil
 from typing import Dict, Iterable, List, Sequence
 
-from .pms_parser import Note, ParseResult
+from .pms_parser import Note
 
 
 @dataclass
@@ -15,22 +14,19 @@ class DensityResult:
     max_density: float
     average_density: float
     cms_density: float
+    chm_density: float
     terminal_density: float
     terminal_rms_density: float
     terminal_cms_density: float
+    terminal_chm_density: float
     rms_density: float
     duration: float
     terminal_window: float | None
     overall_difficulty: float
     terminal_difficulty: float
     terminal_difficulty_cms: float
+    terminal_difficulty_chm: float
     gustiness: float
-
-    @property
-    def cms_rms_ratio(self) -> float | None:
-        if self.rms_density == 0:
-            return None
-        return self.cms_density / self.rms_density
 
 
 def compute_density(
@@ -51,15 +47,18 @@ def compute_density(
             max_density=0.0,
             average_density=0.0,
             cms_density=0.0,
+            chm_density=0.0,
             terminal_density=0.0,
             terminal_rms_density=0.0,
             terminal_cms_density=0.0,
+            terminal_chm_density=0.0,
             rms_density=0.0,
             duration=0.0,
             terminal_window=None,
             overall_difficulty=0.0,
             terminal_difficulty=0.0,
             terminal_difficulty_cms=0.0,
+            terminal_difficulty_chm=0.0,
             gustiness=0.0,
         )
 
@@ -83,6 +82,7 @@ def compute_density(
     terminal_density = 0.0
     terminal_rms_density = 0.0
     terminal_cms_density = 0.0
+    terminal_chm_density = 0.0
     start_bin = len(per_second_total)
     terminal_window_used: float | None = None
     if total_value and len(notes) > 0:
@@ -106,6 +106,7 @@ def compute_density(
                 terminal_cms_density = (
                     sum(val**3 for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
                 ) ** (1.0 / 3.0)
+                terminal_chm_density = sum(val * val for val in terminal_bins_non_zero) / sum(terminal_bins_non_zero)
     # Root-mean-square of per-second densities
     rms_density = (
         (sum(val * val for val in non_zero_bins) / len(non_zero_bins)) ** 0.5
@@ -115,6 +116,7 @@ def compute_density(
     cms_density = (
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
+    chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
 
     mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
     variance = (
@@ -136,6 +138,11 @@ def compute_density(
         if non_terminal_bins_non_zero
         else cms_density
     )
+    non_terminal_chm = (
+        sum(val * val for val in non_terminal_bins_non_zero) / sum(non_terminal_bins_non_zero)
+        if non_terminal_bins_non_zero and sum(non_terminal_bins_non_zero) > 0
+        else chm_density
+    )
 
     overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
     terminal_difficulty = (
@@ -143,6 +150,9 @@ def compute_density(
     )
     terminal_difficulty_cms = (
         (terminal_cms_density - non_terminal_cms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    )
+    terminal_difficulty_chm = (
+        (terminal_chm_density - non_terminal_chm) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
     )
     gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
 
@@ -152,15 +162,18 @@ def compute_density(
         max_density=max_density,
         average_density=average_density,
         cms_density=cms_density,
+        chm_density=chm_density,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
         terminal_cms_density=terminal_cms_density,
+        terminal_chm_density=terminal_chm_density,
         rms_density=rms_density,
         duration=duration,
         terminal_window=terminal_window_used,
         overall_difficulty=overall_difficulty,
         terminal_difficulty=terminal_difficulty,
         terminal_difficulty_cms=terminal_difficulty_cms,
+        terminal_difficulty_chm=terminal_difficulty_chm,
         gustiness=gustiness,
     )
 
@@ -172,13 +185,16 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "max_density": 0.0,
             "average_density": 0.0,
             "cms_density": 0.0,
+            "chm_density": 0.0,
             "terminal_density": 0.0,
             "terminal_rms_density": 0.0,
             "terminal_cms_density": 0.0,
+            "terminal_chm_density": 0.0,
             "rms_density": 0.0,
             "overall_difficulty": 0.0,
             "terminal_difficulty": 0.0,
             "terminal_difficulty_cms": 0.0,
+            "terminal_difficulty_chm": 0.0,
             "gustiness": 0.0,
         }
 
@@ -186,13 +202,16 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "max_density": sum(r.max_density for r in totals) / len(totals),
         "average_density": sum(r.average_density for r in totals) / len(totals),
         "cms_density": sum(r.cms_density for r in totals) / len(totals),
+        "chm_density": sum(r.chm_density for r in totals) / len(totals),
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
         "terminal_rms_density": sum(r.terminal_rms_density for r in totals) / len(totals),
         "terminal_cms_density": sum(r.terminal_cms_density for r in totals) / len(totals),
+        "terminal_chm_density": sum(r.terminal_chm_density for r in totals) / len(totals),
         "rms_density": sum(r.rms_density for r in totals) / len(totals),
         "overall_difficulty": sum(r.overall_difficulty for r in totals) / len(totals),
         "terminal_difficulty": sum(r.terminal_difficulty for r in totals) / len(totals),
         "terminal_difficulty_cms": sum(r.terminal_difficulty_cms for r in totals) / len(totals),
+        "terminal_difficulty_chm": sum(r.terminal_difficulty_chm for r in totals) / len(totals),
         "gustiness": sum(r.gustiness for r in totals) / len(totals),
     }
 
