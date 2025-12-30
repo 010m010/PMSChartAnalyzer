@@ -716,6 +716,8 @@ class DifficultyTab(QWidget):
         self.scale_max_input.setPlaceholderText("縦軸の最大値")
         self.scale_button = QPushButton("更新")
         self.scale_reset_button = QPushButton("リセット")
+        self.show_unresolved_checkbox = QCheckBox("未解析を表示")
+        self.show_total_undefined_checkbox = QCheckBox("TOTAL 未定義を表示")
         self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
         self.summary_metric_selector = QComboBox()
@@ -829,6 +831,11 @@ class DifficultyTab(QWidget):
         table_tab = QWidget()
         table_tab_layout = QVBoxLayout()
         table_tab_layout.setContentsMargins(0, 0, 0, 0)
+        visibility_layout = QHBoxLayout()
+        visibility_layout.addWidget(self.show_unresolved_checkbox)
+        visibility_layout.addWidget(self.show_total_undefined_checkbox)
+        visibility_layout.addStretch()
+        table_tab_layout.addLayout(visibility_layout)
         table_tab_layout.addWidget(self.table_widget)
         table_tab.setLayout(table_tab_layout)
 
@@ -868,6 +875,8 @@ class DifficultyTab(QWidget):
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
         self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
+        self.show_unresolved_checkbox.toggled.connect(self._render_table_and_chart)
+        self.show_total_undefined_checkbox.toggled.connect(self._render_table_and_chart)
         self._refresh_saved_urls()
         self.refresh_songdata_label()
 
@@ -903,6 +912,7 @@ class DifficultyTab(QWidget):
             self._current_url = cache_key
             self._latest_analyses = analyses
             self._current_symbol = table.symbol or ""
+            self._reset_visibility_toggles()
             self._render_table_and_chart()
         self.loading_label.setText("")
         self._refresh_saved_urls(keep_url=self._current_url or cache_key)
@@ -988,6 +998,7 @@ class DifficultyTab(QWidget):
         if url in self._cached_results:
             self._latest_analyses = self._cached_results[url]
             self._current_symbol = self._cached_symbols.get(url, "")
+            self._reset_visibility_toggles()
             self._render_table_and_chart()
             self._reset_sorting_safe()
             self._sync_filter_options()
@@ -1040,7 +1051,7 @@ class DifficultyTab(QWidget):
         self._sync_filter_options()
         self._apply_filter_defaults()
         analyses = self._latest_analyses
-        visible = [a for a in analyses if self._is_difficulty_visible(a.difficulty)]
+        visible = [a for a in analyses if self._is_chart_visible(a)]
         sorting_state = self.table_widget.isSortingEnabled()
         if sorting_state:
             self.table_widget.setSortingEnabled(False)
@@ -1178,7 +1189,7 @@ class DifficultyTab(QWidget):
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
         for analysis in self._latest_analyses:
-            if not self._is_difficulty_visible(analysis.difficulty):
+            if not self._is_chart_visible(analysis):
                 continue
             if not analysis.resolved_path or not analysis.density.per_second_total:
                 continue
@@ -1344,7 +1355,7 @@ class DifficultyTab(QWidget):
         metric = self.summary_metric_selector.currentText()
         rows = {}
         for analysis in self._latest_analyses:
-            if not self._is_difficulty_visible(analysis.difficulty):
+            if not self._is_chart_visible(analysis):
                 continue
             key = self._format_difficulty(analysis.difficulty)
             rows.setdefault(key, {"values": [], "total": 0, "parsed": 0})
@@ -1497,6 +1508,15 @@ class DifficultyTab(QWidget):
         formatted = self._format_difficulty(difficulty)
         return formatted in self._filter_selection
 
+    def _is_chart_visible(self, analysis: ChartAnalysis) -> bool:
+        if not self._is_difficulty_visible(analysis.difficulty):
+            return False
+        if analysis.resolved_path is None:
+            return self.show_unresolved_checkbox.isChecked()
+        if analysis.total_value is None and not self.show_total_undefined_checkbox.isChecked():
+            return False
+        return True
+
     def _sync_filter_options(self) -> None:
         self._available_levels = sorted({self._format_difficulty(a.difficulty) for a in self._latest_analyses}, key=difficulty_sort_key)
         available_set = set(self._available_levels)
@@ -1511,6 +1531,12 @@ class DifficultyTab(QWidget):
         # Ensure all levels are visible after load/switch
         if self._available_levels and not self._filter_selection:
             self._filter_selection = set(self._available_levels)
+
+    def _reset_visibility_toggles(self) -> None:
+        for checkbox in (self.show_unresolved_checkbox, self.show_total_undefined_checkbox):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(False)
+            checkbox.blockSignals(False)
 
 
 class MainWindow(QMainWindow):
