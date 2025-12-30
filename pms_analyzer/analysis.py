@@ -14,8 +14,10 @@ class DensityResult:
     per_second_by_key: List[List[int]]
     max_density: float
     average_density: float
+    cms_density: float
     terminal_density: float
     terminal_rms_density: float
+    terminal_cms_density: float
     rms_density: float
     duration: float
     terminal_window: float | None
@@ -39,6 +41,8 @@ def compute_density(
         return DensityResult(
             empty_bins,
             empty_by_key,
+            0.0,
+            0.0,
             0.0,
             0.0,
             0.0,
@@ -70,6 +74,7 @@ def compute_density(
 
     terminal_density = 0.0
     terminal_rms_density = 0.0
+    terminal_cms_density = 0.0
     start_bin = len(per_second_total)
     terminal_window_used: float | None = None
     if total_value and len(notes) > 0:
@@ -90,11 +95,17 @@ def compute_density(
                 terminal_rms_density = (
                     sum(val * val for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
                 ) ** 0.5
+                terminal_cms_density = (
+                    sum(val**3 for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                ) ** (1.0 / 3.0)
     # Root-mean-square of per-second densities
     rms_density = (
         (sum(val * val for val in non_zero_bins) / len(non_zero_bins)) ** 0.5
         if non_zero_bins
         else 0.0
+    )
+    cms_density = (
+        (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
 
     mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
@@ -124,8 +135,10 @@ def compute_density(
         per_second_by_key=per_second_by_key,
         max_density=max_density,
         average_density=average_density,
+        cms_density=cms_density,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
+        terminal_cms_density=terminal_cms_density,
         rms_density=rms_density,
         duration=duration,
         terminal_window=terminal_window_used,
@@ -141,8 +154,10 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         return {
             "max_density": 0.0,
             "average_density": 0.0,
+            "cms_density": 0.0,
             "terminal_density": 0.0,
             "terminal_rms_density": 0.0,
+            "terminal_cms_density": 0.0,
             "rms_density": 0.0,
             "overall_difficulty": 0.0,
             "terminal_difficulty": 0.0,
@@ -152,8 +167,10 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
     return {
         "max_density": sum(r.max_density for r in totals) / len(totals),
         "average_density": sum(r.average_density for r in totals) / len(totals),
+        "cms_density": sum(r.cms_density for r in totals) / len(totals),
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
         "terminal_rms_density": sum(r.terminal_rms_density for r in totals) / len(totals),
+        "terminal_cms_density": sum(r.terminal_cms_density for r in totals) / len(totals),
         "rms_density": sum(r.rms_density for r in totals) / len(totals),
         "overall_difficulty": sum(r.overall_difficulty for r in totals) / len(totals),
         "terminal_difficulty": sum(r.terminal_difficulty for r in totals) / len(totals),

@@ -296,8 +296,10 @@ class SingleAnalysisTab(QWidget):
             "max_density": "秒間最大密度",
             "average_density": "平均密度",
             "rms_density": "RMS",
+            "cms_density": "CMS",
             "terminal_density": "終端密度",
             "terminal_rms_density": "終端RMS",
+            "terminal_cms_density": "終端CMS",
             "overall_difficulty": "全体難度数",
             "terminal_difficulty": "終端難度数",
             "gustiness": "突風度数",
@@ -422,8 +424,10 @@ class SingleAnalysisTab(QWidget):
             metrics={
                 "max_density": density.max_density,
                 "average_density": density.average_density,
+                "cms_density": density.cms_density,
                 "terminal_density": density.terminal_density,
                 "terminal_rms_density": density.terminal_rms_density,
+                "terminal_cms_density": density.terminal_cms_density,
                 "rms_density": density.rms_density,
                 "overall_difficulty": density.overall_difficulty,
                 "terminal_difficulty": density.terminal_difficulty,
@@ -447,12 +451,15 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.metrics_labels["max_density"], f"{density.max_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
+        self._set_label_text(self.metrics_labels["cms_density"], f"{density.cms_density:.2f} note/s")
         terminal_available = total_value is not None
         terminal_density_text = f"{density.terminal_density:.2f} note/s" if terminal_available else "-"
         terminal_rms_text = f"{density.terminal_rms_density:.2f} note/s" if terminal_available else "-"
+        terminal_cms_text = f"{density.terminal_cms_density:.2f} note/s" if terminal_available else "-"
         terminal_difficulty_value: float | None = density.terminal_difficulty if terminal_available else None
         self._set_label_text(self.metrics_labels["terminal_density"], terminal_density_text)
         self._set_label_text(self.metrics_labels["terminal_rms_density"], terminal_rms_text)
+        self._set_label_text(self.metrics_labels["terminal_cms_density"], terminal_cms_text)
         self._set_label_text(self.metrics_labels["overall_difficulty"], f"{density.overall_difficulty:.2f}")
         terminal_diff_text = "-" if terminal_difficulty_value is None else f"{terminal_difficulty_value:.2f}"
         self._set_label_text(self.metrics_labels["terminal_difficulty"], terminal_diff_text)
@@ -666,7 +673,7 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 16)
+        self.table_widget = QTableWidget(0, 18)
         self.table_widget.setHorizontalHeaderLabels(
             [
                 "LEVEL",
@@ -677,8 +684,10 @@ class DifficultyTab(QWidget):
                 "最大瞬間密度",
                 "平均密度",
                 "RMS",
+                "CMS",
                 "終端密度",
                 "終端RMS",
+                "終端CMS",
                 "全体難度数",
                 "終端難度数",
                 "突風度数",
@@ -706,7 +715,19 @@ class DifficultyTab(QWidget):
         self.url_list.setEditable(False)
         self.metric_selector = QComboBox()
         self.metric_selector.addItems(
-            ["NOTES数", "最大瞬間密度", "平均密度", "RMS", "終端密度", "終端RMS", "全体難度数", "終端難度数", "突風度数"]
+            [
+                "NOTES数",
+                "最大瞬間密度",
+                "平均密度",
+                "RMS",
+                "CMS",
+                "終端密度",
+                "終端RMS",
+                "終端CMS",
+                "全体難度数",
+                "終端難度数",
+                "突風度数",
+            ]
         )
         self.chart_type_selector = QComboBox()
         self.chart_type_selector.addItems(["箱ひげ図", "散布図"])
@@ -728,8 +749,10 @@ class DifficultyTab(QWidget):
                 "最大瞬間密度",
                 "平均密度",
                 "RMS",
+                "CMS",
                 "終端密度",
                 "終端RMS",
+                "終端CMS",
                 "全体難度数",
                 "終端難度数",
                 "突風度数",
@@ -1107,41 +1130,49 @@ class DifficultyTab(QWidget):
             rms_item.setData(Qt.ItemDataRole.UserRole, float(density.rms_density))
             self.table_widget.setItem(row, 7, rms_item)
             terminal_available = analysis.total_value is not None
+            cms_item = SortableTableWidgetItem(f"{density.cms_density:.2f}")
+            cms_item.setData(Qt.ItemDataRole.UserRole, float(density.cms_density))
+            self.table_widget.setItem(row, 8, cms_item)
             term_text = "-" if not terminal_available else f"{density.terminal_density:.2f}"
             term_sort = float("-inf") if not terminal_available else float(density.terminal_density)
             term_item = SortableTableWidgetItem(term_text)
             term_item.setData(Qt.ItemDataRole.UserRole, term_sort)
-            self.table_widget.setItem(row, 8, term_item)
+            self.table_widget.setItem(row, 9, term_item)
             term_rms_text = "-" if not terminal_available else f"{density.terminal_rms_density:.2f}"
             term_rms_sort = float("-inf") if not terminal_available else float(density.terminal_rms_density)
             term_rms_item = SortableTableWidgetItem(term_rms_text)
             term_rms_item.setData(Qt.ItemDataRole.UserRole, term_rms_sort)
-            self.table_widget.setItem(row, 9, term_rms_item)
+            self.table_widget.setItem(row, 10, term_rms_item)
+            term_cms_text = "-" if not terminal_available else f"{density.terminal_cms_density:.2f}"
+            term_cms_sort = float("-inf") if not terminal_available else float(density.terminal_cms_density)
+            term_cms_item = SortableTableWidgetItem(term_cms_text)
+            term_cms_item.setData(Qt.ItemDataRole.UserRole, term_cms_sort)
+            self.table_widget.setItem(row, 11, term_cms_item)
             overall_item = SortableTableWidgetItem(f"{density.overall_difficulty:.2f}")
             overall_item.setData(Qt.ItemDataRole.UserRole, float(density.overall_difficulty))
             self._apply_metric_item_color(overall_item, "overall_difficulty", density.overall_difficulty)
-            self.table_widget.setItem(row, 10, overall_item)
+            self.table_widget.setItem(row, 12, overall_item)
             terminal_diff_value: float | None = density.terminal_difficulty if terminal_available else None
             terminal_diff_text = "-" if terminal_diff_value is None else f"{terminal_diff_value:.2f}"
             terminal_diff_sort = float("-inf") if terminal_diff_value is None else float(terminal_diff_value)
             terminal_diff_item = SortableTableWidgetItem(terminal_diff_text)
             terminal_diff_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_sort)
             self._apply_metric_item_color(terminal_diff_item, "terminal_difficulty", terminal_diff_value)
-            self.table_widget.setItem(row, 11, terminal_diff_item)
+            self.table_widget.setItem(row, 13, terminal_diff_item)
             gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
             gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
             self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
-            self.table_widget.setItem(row, 12, gust_item)
+            self.table_widget.setItem(row, 14, gust_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 13, md5_item)
+            self.table_widget.setItem(row, 15, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 14, sha_item)
+            self.table_widget.setItem(row, 16, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 15, path_item)
+            self.table_widget.setItem(row, 17, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1244,6 +1275,8 @@ class DifficultyTab(QWidget):
             return density.average_density
         if metric == "RMS":
             return density.rms_density
+        if metric == "CMS":
+            return density.cms_density
         if metric == "終端密度":
             if not terminal_available:
                 return None
@@ -1252,6 +1285,10 @@ class DifficultyTab(QWidget):
             if not terminal_available:
                 return None
             return density.terminal_rms_density
+        if metric == "終端CMS":
+            if not terminal_available:
+                return None
+            return density.terminal_cms_density
         if metric == "全体難度数":
             return density.overall_difficulty
         if metric == "終端難度数":
@@ -1284,6 +1321,8 @@ class DifficultyTab(QWidget):
             return density.average_density
         if metric == "RMS":
             return density.rms_density
+        if metric == "CMS":
+            return density.cms_density
         if metric == "終端密度":
             if not terminal_available:
                 return None
@@ -1292,6 +1331,10 @@ class DifficultyTab(QWidget):
             if not terminal_available:
                 return None
             return density.terminal_rms_density
+        if metric == "終端CMS":
+            if not terminal_available:
+                return None
+            return density.terminal_cms_density
         if metric == "全体難度数":
             return density.overall_difficulty
         if metric == "終端難度数":
