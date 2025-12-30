@@ -41,6 +41,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._style_axes(dark=self._is_dark_mode())
         self._bars = None
         self._bar_width: float = 0.9
+        self._edge_margin_px: float = 14.0
         self._bar_colors: list[str] = []
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
@@ -168,6 +169,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
             )
         if y_max:
             self.ax.set_ylim(top=y_max)
+        self.figure.tight_layout()
         self._set_x_limits(len(per_second_by_key))
         self.figure.tight_layout()
         if preserve_selection and saved_selection:
@@ -334,8 +336,30 @@ class StackedDensityChart(FigureCanvasQTAgg):
             smoothed[idx] = np.polyval(coeffs, 0.0)
         return smoothed
 
+    def _get_renderer(self):
+        renderer = self.figure.canvas.get_renderer() if self.figure.canvas else None
+        if renderer is None:
+            self.figure.canvas.draw()
+            renderer = self.figure.canvas.get_renderer()
+        return renderer
+
+    def _pixel_margin_to_data_units(self, margin_px: float, num_bins: int) -> float:
+        if margin_px <= 0:
+            return 0.0
+        renderer = self._get_renderer()
+        try:
+            bbox = self.ax.get_window_extent(renderer=renderer)
+            axis_width_px = bbox.width
+        except Exception:
+            axis_width_px = 0.0
+        if axis_width_px <= 0:
+            return 0.35
+        visible_bins = max(float(num_bins), 1.0)
+        data_per_px = visible_bins / axis_width_px
+        return margin_px * data_per_px
+
     def _set_x_limits(self, num_bins: int) -> None:
-        margin = 0.35
+        margin = self._pixel_margin_to_data_units(self._edge_margin_px, num_bins)
         if num_bins <= 0:
             self._x_limits = (-0.5 - margin, 0.5 + margin)
         else:
