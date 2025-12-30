@@ -14,6 +14,7 @@ class RangeSelectionStats:
     gauge_increase: float | None
     average_density: float
     rms_density: float
+    cms_density: float
 
 
 def compute_range_rms(per_second: List[int], bin_size: float, start: float, end: float) -> float:
@@ -29,6 +30,21 @@ def compute_range_rms(per_second: List[int], bin_size: float, start: float, end:
             continue
         weighted_sum += (val * val) * overlap
     return (weighted_sum / total_duration) ** 0.5 if total_duration > 0 else 0.0
+
+
+def compute_range_cms(per_second: List[int], bin_size: float, start: float, end: float) -> float:
+    if end <= start or not per_second or bin_size <= 0:
+        return 0.0
+    total_duration = end - start
+    weighted_sum = 0.0
+    for idx, val in enumerate(per_second):
+        bin_start = idx * bin_size
+        bin_end = bin_start + bin_size
+        overlap = max(0.0, min(bin_end, end) - max(bin_start, start))
+        if overlap <= 0:
+            continue
+        weighted_sum += (val**3) * overlap
+    return (weighted_sum / total_duration) ** (1.0 / 3.0) if total_duration > 0 else 0.0
 
 
 def calculate_range_selection_stats(
@@ -76,6 +92,7 @@ def calculate_range_selection_stats(
         gauge_increase = gauge_rate * note_count
 
     rms_density = compute_range_rms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
+    cms_density = compute_range_cms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
 
     return RangeSelectionStats(
         start_seconds=start_seconds,
@@ -84,7 +101,13 @@ def calculate_range_selection_stats(
         gauge_increase=gauge_increase,
         average_density=average_density,
         rms_density=rms_density,
+        cms_density=cms_density,
     )
 
 
-__all__ = ["RangeSelectionStats", "calculate_range_selection_stats", "compute_range_rms"]
+__all__ = [
+    "RangeSelectionStats",
+    "calculate_range_selection_stats",
+    "compute_range_rms",
+    "compute_range_cms",
+]
