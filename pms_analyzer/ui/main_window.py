@@ -69,7 +69,7 @@ from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 def _metric_color(metric_key: str, value: float | None) -> QColor | None:
     if value is None:
         return None
-    if metric_key in {"terminal_difficulty", "terminal_difficulty_cms", "terminal_difficulty_chm", "terminal_difficulty_chm_ratio"}:
+    if metric_key == "terminal_difficulty_chm_ratio":
         if value > 0.5:
             return QColor("#cc2f2f")
         if value > 0.2:
@@ -306,18 +306,11 @@ class SingleAnalysisTab(QWidget):
         labels = {
             "max_density": "秒間最大密度",
             "average_density": "平均密度",
-            "rms_density": "RMS",
-            "cms_density": "CMS",
-            "chm_density": "CHM",
+            "chm_density": "体感密度",
             "terminal_density": "終端密度",
-            "terminal_rms_density": "終端RMS",
-            "terminal_cms_density": "終端CMS",
-            "terminal_chm_density": "終端CHM",
+            "terminal_chm_density": "終端体感密度",
             "overall_difficulty": "全体難度数",
-            "terminal_difficulty": "終端難度数",
-            "terminal_difficulty_cms": "終端難度数（CMS）",
-            "terminal_difficulty_chm": "終端難度数（CHM）",
-            "terminal_difficulty_chm_ratio": "終端難度数（CHM）2",
+            "terminal_difficulty_chm_ratio": "終端密度比率",
             "gustiness": "突風度数",
         }
         for row, (key, title) in enumerate(labels.items()):
@@ -339,9 +332,7 @@ class SingleAnalysisTab(QWidget):
             ("range_notes", "NOTES数"),
             ("range_gauge", "ゲージ増加量"),
             ("range_avg", "平均密度"),
-            ("range_rms", "RMS"),
-            ("range_cms", "CMS"),
-            ("range_chm", "CHM"),
+            ("range_chm", "体感密度"),
         ]
         for row, (key, title) in enumerate(range_fields):
             lbl = QLabel(title)
@@ -387,9 +378,6 @@ class SingleAnalysisTab(QWidget):
     def _apply_metric_label_colors(self, values: Dict[str, float | None]) -> None:
         for key in (
             "overall_difficulty",
-            "terminal_difficulty",
-            "terminal_difficulty_cms",
-            "terminal_difficulty_chm",
             "terminal_difficulty_chm_ratio",
             "gustiness",
         ):
@@ -468,48 +456,22 @@ class SingleAnalysisTab(QWidget):
     def _update_metrics(self, density: DensityResult, total_value: float | None) -> None:
         self._set_label_text(self.metrics_labels["max_density"], f"{density.max_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
-        self._set_label_text(self.metrics_labels["rms_density"], f"{density.rms_density:.2f} note/s")
-        self._set_label_text(self.metrics_labels["cms_density"], f"{density.cms_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["chm_density"], f"{density.chm_density:.2f} note/s")
         terminal_available = total_value is not None
         terminal_density_text = f"{density.terminal_density:.2f} note/s" if terminal_available else "-"
-        terminal_rms_text = f"{density.terminal_rms_density:.2f} note/s" if terminal_available else "-"
-        terminal_cms_text = f"{density.terminal_cms_density:.2f} note/s" if terminal_available else "-"
         terminal_chm_text = f"{density.terminal_chm_density:.2f} note/s" if terminal_available else "-"
-        terminal_difficulty_value: float | None = density.terminal_difficulty if terminal_available else None
-        terminal_difficulty_cms_value: float | None = (
-            density.terminal_difficulty_cms if terminal_available else None
-        )
-        terminal_difficulty_chm_value: float | None = (
-            density.terminal_difficulty_chm if terminal_available else None
-        )
         terminal_difficulty_chm_ratio_value: float | None = (
             density.terminal_difficulty_chm_ratio if terminal_available else None
         )
         self._set_label_text(self.metrics_labels["terminal_density"], terminal_density_text)
-        self._set_label_text(self.metrics_labels["terminal_rms_density"], terminal_rms_text)
-        self._set_label_text(self.metrics_labels["terminal_cms_density"], terminal_cms_text)
         self._set_label_text(self.metrics_labels["terminal_chm_density"], terminal_chm_text)
         self._set_label_text(self.metrics_labels["overall_difficulty"], f"{density.overall_difficulty:.2f}")
-        terminal_diff_text = "-" if terminal_difficulty_value is None else f"{terminal_difficulty_value:.2f}"
-        self._set_label_text(self.metrics_labels["terminal_difficulty"], terminal_diff_text)
-        terminal_diff_cms_text = (
-            "-" if terminal_difficulty_cms_value is None else f"{terminal_difficulty_cms_value:.2f}"
-        )
-        self._set_label_text(self.metrics_labels["terminal_difficulty_cms"], terminal_diff_cms_text)
-        terminal_diff_chm_text = (
-            "-" if terminal_difficulty_chm_value is None else f"{terminal_difficulty_chm_value:.2f}"
-        )
-        self._set_label_text(self.metrics_labels["terminal_difficulty_chm"], terminal_diff_chm_text)
         terminal_diff_chm_ratio_text, _ = _format_percent(terminal_difficulty_chm_ratio_value)
         self._set_label_text(self.metrics_labels["terminal_difficulty_chm_ratio"], terminal_diff_chm_ratio_text)
         self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
         self._apply_metric_label_colors(
             {
                 "overall_difficulty": density.overall_difficulty,
-                "terminal_difficulty": terminal_difficulty_value,
-                "terminal_difficulty_cms": terminal_difficulty_cms_value,
-                "terminal_difficulty_chm": terminal_difficulty_chm_value,
                 "terminal_difficulty_chm_ratio": terminal_difficulty_chm_ratio_value,
                 "gustiness": density.gustiness,
             }
@@ -618,8 +580,6 @@ class SingleAnalysisTab(QWidget):
             "range_notes": "-",
             "range_gauge": "-",
             "range_avg": "-",
-            "range_rms": "-",
-            "range_cms": "-",
             "range_chm": "-",
         }
         for key, default in defaults.items():
@@ -689,10 +649,6 @@ class SingleAnalysisTab(QWidget):
             self._set_label_text(self.range_labels["range_gauge"], gauge_text)
         if "range_avg" in self.range_labels:
             self._set_label_text(self.range_labels["range_avg"], f"{stats.average_density:.2f} note/s")
-        if "range_rms" in self.range_labels:
-            self._set_label_text(self.range_labels["range_rms"], f"{stats.rms_density:.2f} note/s")
-        if "range_cms" in self.range_labels:
-            self._set_label_text(self.range_labels["range_cms"], f"{stats.cms_density:.2f} note/s")
         if "range_chm" in self.range_labels:
             self._set_label_text(self.range_labels["range_chm"], f"{stats.chm_density:.2f} note/s")
 
@@ -730,18 +686,11 @@ class DifficultyTab(QWidget):
             "増加率",
             "最大瞬間密度",
             "平均密度",
-            "RMS",
-            "CMS",
-            "CHM",
+            "体感密度",
             "終端密度",
-            "終端RMS",
-            "終端CMS",
-            "終端CHM",
+            "終端体感密度",
             "全体難度数",
-            "終端難度数",
-            "終端難度数（CMS）",
-            "終端難度数（CHM）",
-            "終端難度数（CHM）2",
+            "終端密度比率",
             "突風度数",
             "md5",
             "sha256",
@@ -774,18 +723,11 @@ class DifficultyTab(QWidget):
                 "NOTES数",
                 "最大瞬間密度",
                 "平均密度",
-                "RMS",
-                "CMS",
-                "CHM",
+                "体感密度",
                 "終端密度",
-                "終端RMS",
-                "終端CMS",
-                "終端CHM",
+                "終端体感密度",
                 "全体難度数",
-                "終端難度数",
-                "終端難度数（CMS）",
-                "終端難度数（CHM）",
-                "終端難度数（CHM）2",
+                "終端密度比率",
                 "突風度数",
             ]
         )
@@ -808,18 +750,11 @@ class DifficultyTab(QWidget):
                 "増加率",
                 "最大瞬間密度",
                 "平均密度",
-                "RMS",
-                "CMS",
-                "CHM",
+                "体感密度",
                 "終端密度",
-                "終端RMS",
-                "終端CMS",
-                "終端CHM",
+                "終端体感密度",
                 "全体難度数",
-                "終端難度数",
-                "終端難度数（CMS）",
-                "終端難度数（CHM）",
-                "終端難度数（CHM）2",
+                "終端密度比率",
                 "突風度数",
             ]
         )
@@ -1221,61 +1156,23 @@ class DifficultyTab(QWidget):
             avg_item = SortableTableWidgetItem(f"{density.average_density:.2f}")
             avg_item.setData(Qt.ItemDataRole.UserRole, float(density.average_density))
             self.table_widget.setItem(row, 6, avg_item)
-            rms_item = SortableTableWidgetItem(f"{density.rms_density:.2f}")
-            rms_item.setData(Qt.ItemDataRole.UserRole, float(density.rms_density))
-            self.table_widget.setItem(row, 7, rms_item)
             terminal_available = analysis.total_value is not None
-            cms_item = SortableTableWidgetItem(f"{density.cms_density:.2f}")
-            cms_item.setData(Qt.ItemDataRole.UserRole, float(density.cms_density))
-            self.table_widget.setItem(row, 8, cms_item)
             chm_item = SortableTableWidgetItem(f"{density.chm_density:.2f}")
             chm_item.setData(Qt.ItemDataRole.UserRole, float(density.chm_density))
-            self.table_widget.setItem(row, 9, chm_item)
+            self.table_widget.setItem(row, 7, chm_item)
             term_text = "-" if not terminal_available else f"{density.terminal_density:.2f}"
             term_sort = float("-inf") if not terminal_available else float(density.terminal_density)
             term_item = SortableTableWidgetItem(term_text)
             term_item.setData(Qt.ItemDataRole.UserRole, term_sort)
-            self.table_widget.setItem(row, 10, term_item)
-            term_rms_text = "-" if not terminal_available else f"{density.terminal_rms_density:.2f}"
-            term_rms_sort = float("-inf") if not terminal_available else float(density.terminal_rms_density)
-            term_rms_item = SortableTableWidgetItem(term_rms_text)
-            term_rms_item.setData(Qt.ItemDataRole.UserRole, term_rms_sort)
-            self.table_widget.setItem(row, 11, term_rms_item)
-            term_cms_text = "-" if not terminal_available else f"{density.terminal_cms_density:.2f}"
-            term_cms_sort = float("-inf") if not terminal_available else float(density.terminal_cms_density)
-            term_cms_item = SortableTableWidgetItem(term_cms_text)
-            term_cms_item.setData(Qt.ItemDataRole.UserRole, term_cms_sort)
-            self.table_widget.setItem(row, 12, term_cms_item)
+            self.table_widget.setItem(row, 8, term_item)
             term_chm_text = "-" if not terminal_available else f"{density.terminal_chm_density:.2f}"
             term_chm_sort = float("-inf") if not terminal_available else float(density.terminal_chm_density)
             term_chm_item = SortableTableWidgetItem(term_chm_text)
             term_chm_item.setData(Qt.ItemDataRole.UserRole, term_chm_sort)
-            self.table_widget.setItem(row, 13, term_chm_item)
+            self.table_widget.setItem(row, 9, term_chm_item)
             overall_item = SortableTableWidgetItem(f"{density.overall_difficulty:.2f}")
             overall_item.setData(Qt.ItemDataRole.UserRole, float(density.overall_difficulty))
             self._apply_metric_item_color(overall_item, "overall_difficulty", density.overall_difficulty)
-            self.table_widget.setItem(row, 14, overall_item)
-            terminal_diff_value: float | None = density.terminal_difficulty if terminal_available else None
-            terminal_diff_text = "-" if terminal_diff_value is None else f"{terminal_diff_value:.2f}"
-            terminal_diff_sort = float("-inf") if terminal_diff_value is None else float(terminal_diff_value)
-            terminal_diff_item = SortableTableWidgetItem(terminal_diff_text)
-            terminal_diff_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_sort)
-            self._apply_metric_item_color(terminal_diff_item, "terminal_difficulty", terminal_diff_value)
-            self.table_widget.setItem(row, 15, terminal_diff_item)
-            terminal_diff_cms_value: float | None = density.terminal_difficulty_cms if terminal_available else None
-            terminal_diff_cms_text = "-" if terminal_diff_cms_value is None else f"{terminal_diff_cms_value:.2f}"
-            terminal_diff_cms_sort = float("-inf") if terminal_diff_cms_value is None else float(terminal_diff_cms_value)
-            terminal_diff_cms_item = SortableTableWidgetItem(terminal_diff_cms_text)
-            terminal_diff_cms_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_cms_sort)
-            self._apply_metric_item_color(terminal_diff_cms_item, "terminal_difficulty_cms", terminal_diff_cms_value)
-            self.table_widget.setItem(row, 16, terminal_diff_cms_item)
-            terminal_diff_chm_value: float | None = density.terminal_difficulty_chm if terminal_available else None
-            terminal_diff_chm_text = "-" if terminal_diff_chm_value is None else f"{terminal_diff_chm_value:.2f}"
-            terminal_diff_chm_sort = float("-inf") if terminal_diff_chm_value is None else float(terminal_diff_chm_value)
-            terminal_diff_chm_item = SortableTableWidgetItem(terminal_diff_chm_text)
-            terminal_diff_chm_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_chm_sort)
-            self._apply_metric_item_color(terminal_diff_chm_item, "terminal_difficulty_chm", terminal_diff_chm_value)
-            self.table_widget.setItem(row, 17, terminal_diff_chm_item)
             terminal_diff_chm_ratio_value: float | None = (
                 density.terminal_difficulty_chm_ratio if terminal_available else None
             )
@@ -1290,21 +1187,21 @@ class DifficultyTab(QWidget):
             self._apply_metric_item_color(
                 terminal_diff_chm_ratio_item, "terminal_difficulty_chm_ratio", terminal_diff_chm_ratio_value
             )
-            self.table_widget.setItem(row, 18, terminal_diff_chm_ratio_item)
+            self.table_widget.setItem(row, 11, terminal_diff_chm_ratio_item)
             gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
             gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
             self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
-            self.table_widget.setItem(row, 19, gust_item)
+            self.table_widget.setItem(row, 12, gust_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 20, md5_item)
+            self.table_widget.setItem(row, 13, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 21, sha_item)
+            self.table_widget.setItem(row, 14, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 22, path_item)
+            self.table_widget.setItem(row, 15, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1406,43 +1303,19 @@ class DifficultyTab(QWidget):
             return density.max_density
         if metric == "平均密度":
             return density.average_density
-        if metric == "RMS":
-            return density.rms_density
-        if metric == "CMS":
-            return density.cms_density
-        if metric == "CHM":
+        if metric == "体感密度":
             return density.chm_density
         if metric == "終端密度":
             if not terminal_available:
                 return None
             return density.terminal_density
-        if metric == "終端RMS":
-            if not terminal_available:
-                return None
-            return density.terminal_rms_density
-        if metric == "終端CMS":
-            if not terminal_available:
-                return None
-            return density.terminal_cms_density
-        if metric == "終端CHM":
+        if metric == "終端体感密度":
             if not terminal_available:
                 return None
             return density.terminal_chm_density
         if metric == "全体難度数":
             return density.overall_difficulty
-        if metric == "終端難度数":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty
-        if metric == "終端難度数（CMS）":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty_cms
-        if metric == "終端難度数（CHM）":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty_chm
-        if metric == "終端難度数（CHM）2":
+        if metric == "終端密度比率":
             if not terminal_available:
                 return None
             return density.terminal_difficulty_chm_ratio * 100
@@ -1470,43 +1343,19 @@ class DifficultyTab(QWidget):
             return density.max_density
         if metric == "平均密度":
             return density.average_density
-        if metric == "RMS":
-            return density.rms_density
-        if metric == "CMS":
-            return density.cms_density
-        if metric == "CHM":
+        if metric == "体感密度":
             return density.chm_density
         if metric == "終端密度":
             if not terminal_available:
                 return None
             return density.terminal_density
-        if metric == "終端RMS":
-            if not terminal_available:
-                return None
-            return density.terminal_rms_density
-        if metric == "終端CMS":
-            if not terminal_available:
-                return None
-            return density.terminal_cms_density
-        if metric == "終端CHM":
+        if metric == "終端体感密度":
             if not terminal_available:
                 return None
             return density.terminal_chm_density
         if metric == "全体難度数":
             return density.overall_difficulty
-        if metric == "終端難度数":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty
-        if metric == "終端難度数（CMS）":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty_cms
-        if metric == "終端難度数（CHM）":
-            if not terminal_available:
-                return None
-            return density.terminal_difficulty_chm
-        if metric == "終端難度数（CHM）2":
+        if metric == "終端密度比率":
             if not terminal_available:
                 return None
             return density.terminal_difficulty_chm_ratio * 100
@@ -1596,7 +1445,7 @@ class DifficultyTab(QWidget):
             stats = _quantiles(values)
             labels = [stats["mean"], stats["min"], stats["q1"], stats["median"], stats["q3"], stats["max"]]
             for col, val in enumerate(labels, start=2):
-                if metric == "終端難度数（CHM）2":
+                if metric == "終端密度比率":
                     text = "-" if val is None else f"{val:.2f}%"
                 else:
                     text = "-" if val is None else f"{val:.2f}"
