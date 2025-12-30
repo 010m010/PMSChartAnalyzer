@@ -87,7 +87,7 @@ def _metric_color(metric_key: str, value: float | None) -> QColor | None:
         if value >= 1.2:
             return QColor("#f2b8b5")
         return None
-    if metric_key == "gustiness":
+    if metric_key in {"gustiness", "terminal_gustiness"}:
         if value >= 3.0:
             return QColor("#cc2f2f")
         if value >= 2.0:
@@ -303,17 +303,18 @@ class SingleAnalysisTab(QWidget):
 
         metrics_group = QGroupBox("密度メトリクス")
         grid = QGridLayout()
-        labels = {
-            "max_density": "秒間最大密度",
-            "average_density": "平均密度",
-            "chm_density": "体感密度",
-            "terminal_density": "終端密度",
-            "terminal_chm_density": "終端体感密度",
-            "overall_difficulty": "全体難度数",
-            "terminal_difficulty_chm_ratio": "終端密度比率",
-            "gustiness": "突風度数",
-        }
-        for row, (key, title) in enumerate(labels.items()):
+        labels = [
+            ("max_density", "秒間最大密度"),
+            ("average_density", "平均密度"),
+            ("chm_density", "体感密度"),
+            ("terminal_density", "終端密度"),
+            ("terminal_chm_density", "終端体感密度"),
+            ("overall_difficulty", "全体難度数"),
+            ("gustiness", "突風度数"),
+            ("terminal_gustiness", "終端突風度数"),
+            ("terminal_difficulty_chm_ratio", "終端密度比率"),
+        ]
+        for row, (key, title) in enumerate(labels):
             lbl = QLabel(title)
             lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(lbl, row, 0)
@@ -378,8 +379,9 @@ class SingleAnalysisTab(QWidget):
     def _apply_metric_label_colors(self, values: Dict[str, float | None]) -> None:
         for key in (
             "overall_difficulty",
-            "terminal_difficulty_chm_ratio",
             "gustiness",
+            "terminal_gustiness",
+            "terminal_difficulty_chm_ratio",
         ):
             label = self.metrics_labels.get(key)
             if not label:
@@ -433,11 +435,12 @@ class SingleAnalysisTab(QWidget):
                 "terminal_chm_density": density.terminal_chm_density,
                 "rms_density": density.rms_density,
                 "overall_difficulty": density.overall_difficulty,
+                "gustiness": density.gustiness,
+                "terminal_gustiness": density.terminal_gustiness,
                 "terminal_difficulty": density.terminal_difficulty,
                 "terminal_difficulty_cms": density.terminal_difficulty_cms,
                 "terminal_difficulty_chm": density.terminal_difficulty_chm,
                 "terminal_difficulty_chm_ratio": density.terminal_difficulty_chm_ratio,
-                "gustiness": density.gustiness,
             },
         )
         append_history(record)
@@ -460,20 +463,23 @@ class SingleAnalysisTab(QWidget):
         terminal_available = total_value is not None
         terminal_density_text = f"{density.terminal_density:.2f} note/s" if terminal_available else "-"
         terminal_chm_text = f"{density.terminal_chm_density:.2f} note/s" if terminal_available else "-"
+        terminal_gustiness_text = f"{density.terminal_gustiness:.2f}" if terminal_available else "-"
         terminal_difficulty_chm_ratio_value: float | None = (
             density.terminal_difficulty_chm_ratio if terminal_available else None
         )
         self._set_label_text(self.metrics_labels["terminal_density"], terminal_density_text)
         self._set_label_text(self.metrics_labels["terminal_chm_density"], terminal_chm_text)
         self._set_label_text(self.metrics_labels["overall_difficulty"], f"{density.overall_difficulty:.2f}")
+        self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
+        self._set_label_text(self.metrics_labels["terminal_gustiness"], terminal_gustiness_text)
         terminal_diff_chm_ratio_text, _ = _format_percent(terminal_difficulty_chm_ratio_value)
         self._set_label_text(self.metrics_labels["terminal_difficulty_chm_ratio"], terminal_diff_chm_ratio_text)
-        self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
         self._apply_metric_label_colors(
             {
                 "overall_difficulty": density.overall_difficulty,
-                "terminal_difficulty_chm_ratio": terminal_difficulty_chm_ratio_value,
                 "gustiness": density.gustiness,
+                "terminal_gustiness": density.terminal_gustiness if terminal_available else None,
+                "terminal_difficulty_chm_ratio": terminal_difficulty_chm_ratio_value,
             }
         )
         self._reset_range_metrics()
@@ -690,8 +696,9 @@ class DifficultyTab(QWidget):
             "終端密度",
             "終端体感密度",
             "全体難度数",
-            "終端密度比率",
             "突風度数",
+            "終端突風度数",
+            "終端密度比率",
             "md5",
             "sha256",
             "Path",
@@ -727,8 +734,9 @@ class DifficultyTab(QWidget):
                 "終端密度",
                 "終端体感密度",
                 "全体難度数",
-                "終端密度比率",
                 "突風度数",
+                "終端突風度数",
+                "終端密度比率",
             ]
         )
         self.chart_type_selector = QComboBox()
@@ -754,8 +762,9 @@ class DifficultyTab(QWidget):
                 "終端密度",
                 "終端体感密度",
                 "全体難度数",
-                "終端密度比率",
                 "突風度数",
+                "終端突風度数",
+                "終端密度比率",
             ]
         )
         self.filter_button = QPushButton("絞り込み")
@@ -1173,6 +1182,16 @@ class DifficultyTab(QWidget):
             overall_item = SortableTableWidgetItem(f"{density.overall_difficulty:.2f}")
             overall_item.setData(Qt.ItemDataRole.UserRole, float(density.overall_difficulty))
             self._apply_metric_item_color(overall_item, "overall_difficulty", density.overall_difficulty)
+            gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
+            gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
+            self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
+            terminal_gust_text = "-" if not terminal_available else f"{density.terminal_gustiness:.2f}"
+            terminal_gust_sort = float("-inf") if not terminal_available else float(density.terminal_gustiness)
+            terminal_gust_item = SortableTableWidgetItem(terminal_gust_text)
+            terminal_gust_item.setData(Qt.ItemDataRole.UserRole, terminal_gust_sort)
+            self._apply_metric_item_color(
+                terminal_gust_item, "terminal_gustiness", density.terminal_gustiness if terminal_available else None
+            )
             terminal_diff_chm_ratio_value: float | None = (
                 density.terminal_difficulty_chm_ratio if terminal_available else None
             )
@@ -1187,21 +1206,20 @@ class DifficultyTab(QWidget):
             self._apply_metric_item_color(
                 terminal_diff_chm_ratio_item, "terminal_difficulty_chm_ratio", terminal_diff_chm_ratio_value
             )
-            self.table_widget.setItem(row, 11, terminal_diff_chm_ratio_item)
-            gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
-            gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
-            self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
-            self.table_widget.setItem(row, 12, gust_item)
+            self.table_widget.setItem(row, 10, overall_item)
+            self.table_widget.setItem(row, 11, gust_item)
+            self.table_widget.setItem(row, 12, terminal_gust_item)
+            self.table_widget.setItem(row, 13, terminal_diff_chm_ratio_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 13, md5_item)
+            self.table_widget.setItem(row, 14, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 14, sha_item)
+            self.table_widget.setItem(row, 15, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 15, path_item)
+            self.table_widget.setItem(row, 16, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1315,12 +1333,16 @@ class DifficultyTab(QWidget):
             return density.terminal_chm_density
         if metric == "全体難度数":
             return density.overall_difficulty
+        if metric == "突風度数":
+            return density.gustiness
+        if metric == "終端突風度数":
+            if not terminal_available:
+                return None
+            return density.terminal_gustiness
         if metric == "終端密度比率":
             if not terminal_available:
                 return None
             return density.terminal_difficulty_chm_ratio * 100
-        if metric == "突風度数":
-            return density.gustiness
         if metric == "増加率":
             if analysis.total_value is not None and analysis.note_count:
                 return analysis.total_value / analysis.note_count
@@ -1355,12 +1377,16 @@ class DifficultyTab(QWidget):
             return density.terminal_chm_density
         if metric == "全体難度数":
             return density.overall_difficulty
+        if metric == "突風度数":
+            return density.gustiness
+        if metric == "終端突風度数":
+            if not terminal_available:
+                return None
+            return density.terminal_gustiness
         if metric == "終端密度比率":
             if not terminal_available:
                 return None
             return density.terminal_difficulty_chm_ratio * 100
-        if metric == "突風度数":
-            return density.gustiness
         if metric == "増加率":
             if self._single_overlay_total_value is not None and self._single_overlay_note_count:
                 return self._single_overlay_total_value / self._single_overlay_note_count

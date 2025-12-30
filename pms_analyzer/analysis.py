@@ -28,6 +28,7 @@ class DensityResult:
     terminal_difficulty_chm: float
     terminal_difficulty_chm_ratio: float
     gustiness: float
+    terminal_gustiness: float
 
 
 def compute_density(
@@ -62,6 +63,7 @@ def compute_density(
             terminal_difficulty_chm=0.0,
             terminal_difficulty_chm_ratio=0.0,
             gustiness=0.0,
+            terminal_gustiness=0.0,
         )
 
     # Trim leading/trailing silence to avoid skewing density
@@ -86,6 +88,8 @@ def compute_density(
     terminal_cms_density = 0.0
     terminal_chm_density = 0.0
     terminal_difficulty_chm_ratio = 0.0
+    terminal_max_density = 0.0
+    terminal_gustiness = 0.0
     start_bin = len(per_second_total)
     terminal_window_used: float | None = None
     if total_value and len(notes) > 0:
@@ -101,6 +105,7 @@ def compute_density(
                 terminal_density = len(terminal_notes) / window
             start_bin = min(max(int(max(terminal_start - start_time, 0.0) // bin_size), 0), len(per_second_total))
             terminal_bins = per_second_total[start_bin:] if start_bin < len(per_second_total) else []
+            terminal_max_density = max(terminal_bins) if terminal_bins else 0.0
             terminal_bins_non_zero = [val for val in terminal_bins if val > 0]
             if terminal_bins_non_zero:
                 terminal_rms_density = (
@@ -110,6 +115,16 @@ def compute_density(
                     sum(val**3 for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
                 ) ** (1.0 / 3.0)
                 terminal_chm_density = sum(val * val for val in terminal_bins_non_zero) / sum(terminal_bins_non_zero)
+                terminal_mean_per_second = sum(terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                terminal_variance = (
+                    sum((val - terminal_mean_per_second) ** 2 for val in terminal_bins_non_zero)
+                    / len(terminal_bins_non_zero)
+                )
+                terminal_std_per_second = terminal_variance**0.5
+                if terminal_std_per_second > 0:
+                    terminal_gustiness = (terminal_max_density - terminal_mean_per_second) / (
+                        terminal_std_per_second + epsilon
+                    )
     # Root-mean-square of per-second densities
     rms_density = (
         (sum(val * val for val in non_zero_bins) / len(non_zero_bins)) ** 0.5
@@ -160,6 +175,8 @@ def compute_density(
     if terminal_window_used is not None and non_terminal_chm > 0:
         terminal_difficulty_chm_ratio = (terminal_chm_density / non_terminal_chm) - 1.0
     gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    if terminal_window_used is None:
+        terminal_gustiness = 0.0
 
     return DensityResult(
         per_second_total=per_second_total,
@@ -181,6 +198,7 @@ def compute_density(
         terminal_difficulty_chm=terminal_difficulty_chm,
         terminal_difficulty_chm_ratio=terminal_difficulty_chm_ratio,
         gustiness=gustiness,
+        terminal_gustiness=terminal_gustiness,
     )
 
 
@@ -203,6 +221,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "terminal_difficulty_chm": 0.0,
             "terminal_difficulty_chm_ratio": 0.0,
             "gustiness": 0.0,
+            "terminal_gustiness": 0.0,
         }
 
     return {
@@ -221,6 +240,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "terminal_difficulty_chm": sum(r.terminal_difficulty_chm for r in totals) / len(totals),
         "terminal_difficulty_chm_ratio": sum(r.terminal_difficulty_chm_ratio for r in totals) / len(totals),
         "gustiness": sum(r.gustiness for r in totals) / len(totals),
+        "terminal_gustiness": sum(r.terminal_gustiness for r in totals) / len(totals),
     }
 
 
