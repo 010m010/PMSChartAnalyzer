@@ -68,7 +68,7 @@ from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 def _metric_color(metric_key: str, value: float | None) -> QColor | None:
     if value is None:
         return None
-    if metric_key == "terminal_difficulty":
+    if metric_key in {"terminal_difficulty", "terminal_difficulty_cms"}:
         if value > 0.5:
             return QColor("#cc2f2f")
         if value > 0.2:
@@ -302,6 +302,7 @@ class SingleAnalysisTab(QWidget):
             "terminal_cms_density": "終端CMS",
             "overall_difficulty": "全体難度数",
             "terminal_difficulty": "終端難度数",
+            "terminal_difficulty_cms": "終端難度数（CMS）",
             "gustiness": "突風度数",
         }
         for row, (key, title) in enumerate(labels.items()):
@@ -379,7 +380,7 @@ class SingleAnalysisTab(QWidget):
         label.setToolTip(text)
 
     def _apply_metric_label_colors(self, values: Dict[str, float | None]) -> None:
-        for key in ("overall_difficulty", "terminal_difficulty", "gustiness"):
+        for key in ("overall_difficulty", "terminal_difficulty", "terminal_difficulty_cms", "gustiness"):
             label = self.metrics_labels.get(key)
             if not label:
                 continue
@@ -427,13 +428,14 @@ class SingleAnalysisTab(QWidget):
                 "cms_density": density.cms_density,
                 "terminal_density": density.terminal_density,
                 "terminal_rms_density": density.terminal_rms_density,
-                "terminal_cms_density": density.terminal_cms_density,
-                "rms_density": density.rms_density,
-                "overall_difficulty": density.overall_difficulty,
-                "terminal_difficulty": density.terminal_difficulty,
-                "gustiness": density.gustiness,
-            },
-        )
+            "terminal_cms_density": density.terminal_cms_density,
+            "rms_density": density.rms_density,
+            "overall_difficulty": density.overall_difficulty,
+            "terminal_difficulty": density.terminal_difficulty,
+            "terminal_difficulty_cms": density.terminal_difficulty_cms,
+            "gustiness": density.gustiness,
+        },
+    )
         append_history(record)
         if self._single_result_callback:
             self._single_result_callback(
@@ -457,17 +459,25 @@ class SingleAnalysisTab(QWidget):
         terminal_rms_text = f"{density.terminal_rms_density:.2f} note/s" if terminal_available else "-"
         terminal_cms_text = f"{density.terminal_cms_density:.2f} note/s" if terminal_available else "-"
         terminal_difficulty_value: float | None = density.terminal_difficulty if terminal_available else None
+        terminal_difficulty_cms_value: float | None = (
+            density.terminal_difficulty_cms if terminal_available else None
+        )
         self._set_label_text(self.metrics_labels["terminal_density"], terminal_density_text)
         self._set_label_text(self.metrics_labels["terminal_rms_density"], terminal_rms_text)
         self._set_label_text(self.metrics_labels["terminal_cms_density"], terminal_cms_text)
         self._set_label_text(self.metrics_labels["overall_difficulty"], f"{density.overall_difficulty:.2f}")
         terminal_diff_text = "-" if terminal_difficulty_value is None else f"{terminal_difficulty_value:.2f}"
         self._set_label_text(self.metrics_labels["terminal_difficulty"], terminal_diff_text)
+        terminal_diff_cms_text = (
+            "-" if terminal_difficulty_cms_value is None else f"{terminal_difficulty_cms_value:.2f}"
+        )
+        self._set_label_text(self.metrics_labels["terminal_difficulty_cms"], terminal_diff_cms_text)
         self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
         self._apply_metric_label_colors(
             {
                 "overall_difficulty": density.overall_difficulty,
                 "terminal_difficulty": terminal_difficulty_value,
+                "terminal_difficulty_cms": terminal_difficulty_cms_value,
                 "gustiness": density.gustiness,
             }
         )
@@ -673,7 +683,7 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
-        self.table_widget = QTableWidget(0, 18)
+        self.table_widget = QTableWidget(0, 19)
         self.table_widget.setHorizontalHeaderLabels(
             [
                 "LEVEL",
@@ -690,6 +700,7 @@ class DifficultyTab(QWidget):
                 "終端CMS",
                 "全体難度数",
                 "終端難度数",
+                "終端難度数（CMS）",
                 "突風度数",
                 "md5",
                 "sha256",
@@ -726,6 +737,7 @@ class DifficultyTab(QWidget):
                 "終端CMS",
                 "全体難度数",
                 "終端難度数",
+                "終端難度数（CMS）",
                 "突風度数",
             ]
         )
@@ -755,6 +767,7 @@ class DifficultyTab(QWidget):
                 "終端CMS",
                 "全体難度数",
                 "終端難度数",
+                "終端難度数（CMS）",
                 "突風度数",
             ]
         )
@@ -1159,20 +1172,27 @@ class DifficultyTab(QWidget):
             terminal_diff_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_sort)
             self._apply_metric_item_color(terminal_diff_item, "terminal_difficulty", terminal_diff_value)
             self.table_widget.setItem(row, 13, terminal_diff_item)
+            terminal_diff_cms_value: float | None = density.terminal_difficulty_cms if terminal_available else None
+            terminal_diff_cms_text = "-" if terminal_diff_cms_value is None else f"{terminal_diff_cms_value:.2f}"
+            terminal_diff_cms_sort = float("-inf") if terminal_diff_cms_value is None else float(terminal_diff_cms_value)
+            terminal_diff_cms_item = SortableTableWidgetItem(terminal_diff_cms_text)
+            terminal_diff_cms_item.setData(Qt.ItemDataRole.UserRole, terminal_diff_cms_sort)
+            self._apply_metric_item_color(terminal_diff_cms_item, "terminal_difficulty_cms", terminal_diff_cms_value)
+            self.table_widget.setItem(row, 14, terminal_diff_cms_item)
             gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
             gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
             self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
-            self.table_widget.setItem(row, 14, gust_item)
+            self.table_widget.setItem(row, 15, gust_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 15, md5_item)
+            self.table_widget.setItem(row, 16, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 16, sha_item)
+            self.table_widget.setItem(row, 17, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 17, path_item)
+            self.table_widget.setItem(row, 18, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1295,6 +1315,10 @@ class DifficultyTab(QWidget):
             if not terminal_available:
                 return None
             return density.terminal_difficulty
+        if metric == "終端難度数（CMS）":
+            if not terminal_available:
+                return None
+            return density.terminal_difficulty_cms
         if metric == "突風度数":
             return density.gustiness
         if metric == "増加率":
@@ -1341,6 +1365,10 @@ class DifficultyTab(QWidget):
             if not terminal_available:
                 return None
             return density.terminal_difficulty
+        if metric == "終端難度数（CMS）":
+            if not terminal_available:
+                return None
+            return density.terminal_difficulty_cms
         if metric == "突風度数":
             return density.gustiness
         if metric == "増加率":

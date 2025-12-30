@@ -23,6 +23,7 @@ class DensityResult:
     terminal_window: float | None
     overall_difficulty: float
     terminal_difficulty: float
+    terminal_difficulty_cms: float
     gustiness: float
 
 
@@ -39,20 +40,21 @@ def compute_density(
         empty_bins: List[int] = []
         empty_by_key: List[List[int]] = []
         return DensityResult(
-            empty_bins,
-            empty_by_key,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            None,
-            0.0,
-            0.0,
-            0.0,
+            per_second_total=empty_bins,
+            per_second_by_key=empty_by_key,
+            max_density=0.0,
+            average_density=0.0,
+            cms_density=0.0,
+            terminal_density=0.0,
+            terminal_rms_density=0.0,
+            terminal_cms_density=0.0,
+            rms_density=0.0,
+            duration=0.0,
+            terminal_window=None,
+            overall_difficulty=0.0,
+            terminal_difficulty=0.0,
+            terminal_difficulty_cms=0.0,
+            gustiness=0.0,
         )
 
     # Trim leading/trailing silence to avoid skewing density
@@ -123,10 +125,18 @@ def compute_density(
         if non_terminal_bins_non_zero
         else rms_density
     )
+    non_terminal_cms = (
+        (sum(val**3 for val in non_terminal_bins_non_zero) / len(non_terminal_bins_non_zero)) ** (1.0 / 3.0)
+        if non_terminal_bins_non_zero
+        else cms_density
+    )
 
     overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
     terminal_difficulty = (
         (terminal_rms_density - non_terminal_rms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    )
+    terminal_difficulty_cms = (
+        (terminal_cms_density - non_terminal_cms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
     )
     gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
 
@@ -144,6 +154,7 @@ def compute_density(
         terminal_window=terminal_window_used,
         overall_difficulty=overall_difficulty,
         terminal_difficulty=terminal_difficulty,
+        terminal_difficulty_cms=terminal_difficulty_cms,
         gustiness=gustiness,
     )
 
@@ -161,6 +172,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "rms_density": 0.0,
             "overall_difficulty": 0.0,
             "terminal_difficulty": 0.0,
+            "terminal_difficulty_cms": 0.0,
             "gustiness": 0.0,
         }
 
@@ -174,6 +186,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "rms_density": sum(r.rms_density for r in totals) / len(totals),
         "overall_difficulty": sum(r.overall_difficulty for r in totals) / len(totals),
         "terminal_difficulty": sum(r.terminal_difficulty for r in totals) / len(totals),
+        "terminal_difficulty_cms": sum(r.terminal_difficulty_cms for r in totals) / len(totals),
         "gustiness": sum(r.gustiness for r in totals) / len(totals),
     }
 

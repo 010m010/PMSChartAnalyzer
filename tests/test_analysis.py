@@ -33,6 +33,7 @@ def test_parse_and_density(tmp_path: Path) -> None:
     assert density.terminal_rms_density >= 0
     assert density.cms_density > 0
     assert density.terminal_cms_density >= 0
+    assert density.terminal_difficulty_cms == density.terminal_difficulty_cms  # ensure attribute exists (not NaN)
     assert density.rms_density > 0
 
     stats = calculate_range_selection_stats(
