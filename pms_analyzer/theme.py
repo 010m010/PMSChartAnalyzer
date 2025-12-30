@@ -168,6 +168,25 @@ def build_widget_styles(dark: bool) -> str:
         background: {border};
         margin: 4px 6px;
     }}
+    QMenuBar {{
+        background-color: {base};
+        color: {text};
+        padding: 6px 10px;
+    }}
+    QMenuBar::item {{
+        padding: 6px 12px;
+        margin: 0 6px;
+        background: transparent;
+        border-radius: 4px;
+    }}
+    QMenuBar::item:selected {{
+        background: {hover};
+        color: {text};
+    }}
+    QMenuBar::item:pressed {{
+        background: {highlight};
+        color: #ffffff;
+    }}
     QTableWidget, QTableView {{
         background-color: {popup};
         alternate-background-color: {base};

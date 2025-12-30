@@ -2305,11 +2305,6 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.single_tab._open_file_dialog)
         file_menu.addAction(open_action)
 
-        tools_menu = menu.addMenu("ツール")
-        playground_action = QAction("自由入力プレビューを開く", self)
-        playground_action.triggered.connect(lambda: self._open_playground(playground_action))
-        tools_menu.addAction(playground_action)
-
         settings_menu = menu.addMenu("設定")
         set_path_action = QAction("songdata.db パスを指定", self)
         set_path_action.triggered.connect(self._select_songdata_path)
@@ -2325,6 +2320,11 @@ class MainWindow(QMainWindow):
             self.theme_action_group.addAction(action)
             theme_menu.addAction(action)
         self.theme_action_group.triggered.connect(self._on_theme_selected)
+
+        help_menu = menu.addMenu("ヘルプ")
+        playground_action = QAction("用語・指標について", self)
+        playground_action.triggered.connect(self._open_playground)
+        help_menu.addAction(playground_action)
 
     def _apply_theme_mode(self, mode: str, *, save: bool = True) -> None:
         self.theme_mode = mode
@@ -2399,7 +2399,7 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.single_tab)
         self.single_tab.load_file(path)
 
-    def _open_playground(self, action: QAction) -> None:
+    def _open_playground(self) -> None:
         if self.playground_dialog and not self.playground_dialog.isHidden():
             self.playground_dialog.show()
             self.playground_dialog.raise_()
@@ -2407,7 +2407,7 @@ class MainWindow(QMainWindow):
             self.playground_dialog.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
             return
         self.playground_dialog = PlaygroundDialog(self, theme_mode=self.theme_mode)
-        self.playground_dialog.finished.connect(lambda _: action.setFocus())
+        self.playground_dialog.finished.connect(lambda _: self.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
         self.playground_dialog.show()
 
     def _refresh_songdata_label(self) -> None:
