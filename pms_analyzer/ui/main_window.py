@@ -912,6 +912,8 @@ class DifficultyTab(QWidget):
         chart_layout.setContentsMargins(0, 0, 0, 0)
         chart_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         metric_layout = QHBoxLayout()
+        metric_layout.addWidget(self.filter_button)
+        metric_layout.addWidget(self.filter_status_label)
         metric_layout.addStretch()
         metric_layout.addWidget(QLabel("縦軸:"))
         metric_layout.addWidget(self.metric_selector)
@@ -947,8 +949,6 @@ class DifficultyTab(QWidget):
         visibility_layout = QVBoxLayout()
         visibility_top_row = QHBoxLayout()
         visibility_top_row.addWidget(self.column_visibility_button)
-        visibility_top_row.addWidget(self.filter_button)
-        visibility_top_row.addWidget(self.filter_status_label)
         visibility_top_row.addStretch()
         visibility_top_row.addWidget(self.export_table_button)
         visibility_layout.addLayout(visibility_top_row)
@@ -1707,7 +1707,7 @@ class DifficultyTab(QWidget):
 
     def _update_filter_indicator(self) -> None:
         if self._is_filter_active():
-            self.filter_status_label.setText("フィルター適用中")
+            self.filter_status_label.setText("適用中")
             self.filter_status_label.show()
         else:
             self.filter_status_label.hide()
