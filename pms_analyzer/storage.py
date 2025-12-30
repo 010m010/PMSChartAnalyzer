@@ -146,6 +146,7 @@ def history_by_difficulty() -> Dict[str, List[DensityResult]]:
                 terminal_difficulty_chm=float(metrics.get("terminal_difficulty_chm", 0.0)),
                 terminal_difficulty_chm_ratio=float(metrics.get("terminal_difficulty_chm_ratio", 0.0)),
                 gustiness=float(metrics.get("gustiness", 0.0)),
+                terminal_gustiness=float(metrics.get("terminal_gustiness", 0.0)),
             )
         )
     return grouped
