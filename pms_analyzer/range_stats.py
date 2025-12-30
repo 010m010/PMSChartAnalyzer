@@ -12,6 +12,7 @@ class RangeSelectionStats:
     end_seconds: float
     note_count: int
     gauge_increase: float | None
+    max_density: float
     average_density: float
     rms_density: float
     cms_density: float
@@ -109,6 +110,8 @@ def calculate_range_selection_stats(
         gauge_rate = total_value / len(notes)
         gauge_increase = gauge_rate * note_count
 
+    selected_bins = per_second_total[start_bin_index:end_bin_index]
+    max_density = max(selected_bins) if selected_bins else 0.0
     rms_density = compute_range_rms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
     cms_density = compute_range_cms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
     chm_density = compute_range_chm(per_second_total, resolved_bin_size, start_seconds, end_seconds)
@@ -118,6 +121,7 @@ def calculate_range_selection_stats(
         end_seconds=end_seconds,
         note_count=note_count,
         gauge_increase=gauge_increase,
+        max_density=max_density,
         average_density=average_density,
         rms_density=rms_density,
         cms_density=cms_density,
