@@ -95,7 +95,7 @@ def analyze_table(
 
         if resolved_path is None:
             density = DensityResult(
-                [], [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0, 0.0, 0.0
+                [], [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0, 0.0, 0.0, 0.0
             )
             analyses.append(
                 ChartAnalysis(
