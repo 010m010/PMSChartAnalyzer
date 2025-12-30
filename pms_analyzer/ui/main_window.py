@@ -853,8 +853,8 @@ class DifficultyTab(QWidget):
         self._worker: Optional[DifficultyTableWorker] = None
         self._open_single_callback: Optional[callable[[Path], None]] = None
         self._column_visibility: dict[str, bool] = {label: True for label in self._table_headers}
-        self._build_ui()
         self._available_levels: list[str] = []
+        self._build_ui()
 
     def set_open_single_handler(self, handler: callable[[Path], None]) -> None:
         self._open_single_callback = handler
