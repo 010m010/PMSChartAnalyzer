@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .analysis import DensityResult
+from .difficulty_table import DifficultyEntry, DifficultyTable
 
 CONFIG_DIR = Path.home() / ".pms_chart_analyzer"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 HISTORY_PATH = CONFIG_DIR / "history.json"
+DIFFICULTY_CACHE_PATH = CONFIG_DIR / "difficulty_cache.json"
 
 
 @dataclass
@@ -152,6 +154,88 @@ def history_by_difficulty() -> Dict[str, List[DensityResult]]:
     return grouped
 
 
+def _load_cached_tables() -> Dict[str, object]:
+    if DIFFICULTY_CACHE_PATH.exists():
+        try:
+            return json.loads(DIFFICULTY_CACHE_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def save_cached_difficulty_table(url: str, table: DifficultyTable) -> None:
+    ensure_config_dir()
+    cache = _load_cached_tables()
+    entries: list[dict[str, object | None]] = []
+    for entry in table.entries:
+        entries.append(
+            {
+                "difficulty": entry.difficulty,
+                "title": entry.title,
+                "subtitle": entry.subtitle,
+                "artist": entry.artist,
+                "chart_path": str(entry.chart_path) if entry.chart_path else None,
+                "md5": entry.md5,
+                "sha256": entry.sha256,
+                "total_value": entry.total_value,
+                "note_count": entry.note_count,
+            }
+        )
+    cache[url] = {"name": table.name, "symbol": table.symbol, "entries": entries}
+    DIFFICULTY_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_cached_difficulty_table(url: str) -> Optional[DifficultyTable]:
+    cache = _load_cached_tables()
+    raw_table = cache.get(url)
+    if not isinstance(raw_table, dict):
+        return None
+    raw_entries = raw_table.get("entries")
+    if not isinstance(raw_entries, list):
+        return None
+    entries: list[DifficultyEntry] = []
+    for item in raw_entries:
+        if not isinstance(item, dict):
+            continue
+        chart_path = item.get("chart_path")
+        path_obj = Path(str(chart_path)) if chart_path else None
+        note_count = item.get("note_count")
+        try:
+            note_count_val: Optional[int] = int(note_count) if note_count is not None else None
+        except (TypeError, ValueError):
+            note_count_val = None
+        total_value = item.get("total_value")
+        try:
+            total_value_val: Optional[float] = float(total_value) if total_value is not None else None
+        except (TypeError, ValueError):
+            total_value_val = None
+        entries.append(
+            DifficultyEntry(
+                difficulty=str(item.get("difficulty") or "Unknown"),
+                title=str(item.get("title") or "Unknown"),
+                subtitle=item.get("subtitle") or None,
+                chart_path=path_obj if chart_path else None,
+                artist=item.get("artist") or None,
+                md5=item.get("md5") or None,
+                sha256=item.get("sha256") or None,
+                total_value=total_value_val,
+                note_count=note_count_val,
+            )
+        )
+    name = raw_table.get("name") or Path(url).stem or "table"
+    symbol = raw_table.get("symbol") if isinstance(raw_table.get("symbol"), str) else None
+    return DifficultyTable(name=name, entries=entries, symbol=symbol)
+
+
+def remove_cached_difficulty_table(url: str) -> None:
+    if not DIFFICULTY_CACHE_PATH.exists():
+        return
+    cache = _load_cached_tables()
+    if url in cache:
+        cache.pop(url)
+        DIFFICULTY_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 __all__ = [
     "AnalysisRecord",
     "append_history",
@@ -164,4 +248,7 @@ __all__ = [
     "add_saved_table",
     "update_saved_table_name",
     "remove_saved_table",
+    "save_cached_difficulty_table",
+    "load_cached_difficulty_table",
+    "remove_cached_difficulty_table",
 ]

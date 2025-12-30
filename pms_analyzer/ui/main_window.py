@@ -57,10 +57,13 @@ from ..storage import (
     SavedDifficultyTable,
     add_saved_table,
     append_history,
+    load_cached_difficulty_table,
     get_saved_tables,
     load_config,
+    remove_cached_difficulty_table,
     remove_saved_table,
     save_config,
+    save_cached_difficulty_table,
     update_saved_table_name,
 )
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
@@ -169,33 +172,46 @@ class DifficultyTableWorker(QThread):
     finished = pyqtSignal(str, object, object)
     failed = pyqtSignal(str)
 
-    def __init__(self, parser: PMSParser, table_source: str, saved_name: str, *, songdata_db: Optional[Path], beatoraja_base: Optional[Path]):
+    def __init__(
+        self,
+        parser: PMSParser,
+        table_source: str,
+        saved_name: str,
+        *,
+        songdata_db: Optional[Path],
+        beatoraja_base: Optional[Path],
+        cached_table: Optional[DifficultyTable] = None,
+    ):
         super().__init__()
         self.parser = parser
         self.table_source = table_source
         self.saved_name = saved_name
         self.songdata_db = songdata_db
         self.beatoraja_base = beatoraja_base
+        self.cached_table = cached_table
 
     def run(self) -> None:  # type: ignore[override]
         try:
-            response = requests.get(self.table_source, timeout=15)
-            response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "").lower()
-            if "html" in content_type or self.table_source.lower().endswith((".html", ".htm")):
-                suffix = ".html"
-            elif self.table_source.lower().endswith(".json"):
-                suffix = ".json"
-            elif self.table_source.lower().endswith(".csv"):
-                suffix = ".csv"
+            if self.cached_table is not None:
+                table = self.cached_table
             else:
-                suffix = ".html" if "<html" in response.text.lower() else ".csv"
-            table = load_difficulty_table_from_content(
-                self.saved_name,
-                response.text,
-                suffix,
-                source_url=self.table_source,
-            )
+                response = requests.get(self.table_source, timeout=15)
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "html" in content_type or self.table_source.lower().endswith((".html", ".htm")):
+                    suffix = ".html"
+                elif self.table_source.lower().endswith(".json"):
+                    suffix = ".json"
+                elif self.table_source.lower().endswith(".csv"):
+                    suffix = ".csv"
+                else:
+                    suffix = ".html" if "<html" in response.text.lower() else ".csv"
+                table = load_difficulty_table_from_content(
+                    self.saved_name,
+                    response.text,
+                    suffix,
+                    source_url=self.table_source,
+                )
             analyses = analyze_table(
                 table,
                 self.parser,
@@ -962,6 +978,7 @@ class DifficultyTab(QWidget):
         self._cached_results[cache_key] = analyses
         self._cached_symbols[cache_key] = table.symbol or ""
         self._cached_table_names[cache_key] = table.name or self._derive_table_name(cache_key)
+        save_cached_difficulty_table(cache_key, table)
         if table.name:
             update_saved_table_name(cache_key, table.name)
 
@@ -985,10 +1002,18 @@ class DifficultyTab(QWidget):
     def _start_download(self, url: str, *, add_to_saved: bool = True, force_refresh: bool = False) -> None:
         saved_entry = next((table for table in self._saved_tables if table.url == url), None)
         fallback_name = Path(url).stem or url or "table"
+        cached_table: DifficultyTable | None = None
+        if not force_refresh:
+            cached_table = load_cached_difficulty_table(url)
+            if cached_table and cached_table.name:
+                fallback_name = cached_table.name
         name = (saved_entry.name if saved_entry and saved_entry.name else None) or fallback_name
         self.analyze_button.setEnabled(False)
         self.load_button.setEnabled(False)
-        self.loading_label.setText("読み込み/解析中です。数分かかる場合があります...")
+        if cached_table is not None:
+            self.loading_label.setText("保存済みデータから解析中です。数分かかる場合があります...")
+        else:
+            self.loading_label.setText("読み込み/解析中です。数分かかる場合があります...")
         self._current_url = url
         config = load_config()
         songdata_dir = Path(config["songdata_dir"]) if config.get("songdata_dir") else None
@@ -1010,7 +1035,12 @@ class DifficultyTab(QWidget):
                 self.load_button.setEnabled(True)
                 return
         self._worker = DifficultyTableWorker(
-            self.parser, url, name, songdata_db=songdata_db, beatoraja_base=songdata_dir
+            self.parser,
+            url,
+            name,
+            songdata_db=songdata_db,
+            beatoraja_base=songdata_dir,
+            cached_table=cached_table,
         )
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
@@ -1030,7 +1060,13 @@ class DifficultyTab(QWidget):
         self.url_list.clear()
         self._saved_tables = get_saved_tables()
         for table in self._saved_tables:
-            display = table.name or table.url
+            cached_display_name = None
+            if not table.name:
+                cached = load_cached_difficulty_table(table.url)
+                if cached:
+                    cached_display_name = cached.name
+                    self._cached_table_names.setdefault(table.url, cached.name)
+            display = table.name or cached_display_name or table.url
             if table.name:
                 self._cached_table_names.setdefault(table.url, table.name)
             self.url_list.addItem(display, table.url)
@@ -1066,9 +1102,13 @@ class DifficultyTab(QWidget):
             self._sync_filter_options()
             self._apply_filter_defaults()
         else:
-            self._latest_analyses = []
-            self._current_symbol = ""
-            self._render_table_and_chart()
+            cached_table = load_cached_difficulty_table(url)
+            if cached_table:
+                self._start_download(url, add_to_saved=False, force_refresh=False)
+            else:
+                self._latest_analyses = []
+                self._current_symbol = ""
+                self._render_table_and_chart()
 
     def _on_select_saved(self, index: int) -> None:
         if index < 0 or index >= self.url_list.count():
@@ -1086,6 +1126,7 @@ class DifficultyTab(QWidget):
         if not current:
             return
         remove_saved_table(current)
+        remove_cached_difficulty_table(current)
         if current in self._cached_results:
             self._cached_results.pop(current, None)
             self._cached_symbols.pop(current, None)
