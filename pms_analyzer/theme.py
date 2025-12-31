@@ -171,11 +171,11 @@ def build_widget_styles(dark: bool) -> str:
     QMenuBar {{
         background-color: {base};
         color: {text};
-        padding: 6px 10px;
+        padding: 4px 8px;
     }}
     QMenuBar::item {{
-        padding: 6px 12px;
-        margin: 0 6px;
+        padding: 6px 10px;
+        margin: 0 4px;
         background: transparent;
         border-radius: 4px;
     }}
