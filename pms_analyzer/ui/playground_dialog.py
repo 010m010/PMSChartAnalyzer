@@ -583,9 +583,7 @@ class PlaygroundDialog(QDialog):
             ("terminal_chm_density", "終端体感密度"),
         ]
         right_labels = [
-            ("overall_difficulty", "全体難度数"),
             ("gustiness", "突風度数"),
-            ("terminal_gustiness", "終端突風度数"),
             ("terminal_density_difference", "終端密度差"),
         ]
 
@@ -700,9 +698,7 @@ class PlaygroundDialog(QDialog):
             "terminal_chm_density",
             "-" if not terminal_available else f"{density.terminal_chm_density:.2f} note/s",
         )
-        set_text("overall_difficulty", f"{density.overall_difficulty:.2f}")
         set_text("gustiness", f"{density.gustiness:.2f}")
-        set_text("terminal_gustiness", "-" if not terminal_available else f"{density.terminal_gustiness:.2f}")
         density_diff_text = "-" if not terminal_available else f"{density.terminal_density_difference:.2f}"
         set_text("terminal_density_difference", density_diff_text)
 
