@@ -734,7 +734,7 @@ class PlaygroundDialog(QDialog):
         set_text("average_density", f"{density.average_density:.2f} note/s")
         set_text("chm_density", f"{density.chm_density:.2f} note/s")
         set_text("high_density_occupancy_rate", f"{density.high_density_occupancy_rate:.2f} %")
-        set_text("density_change", f"{density.density_change:.2f}")
+        set_text("density_change", f"{density.density_change:.3f}")
         terminal_available = density.terminal_window is not None and density.terminal_window > 0
         set_text("terminal_density", "-" if not terminal_available else f"{density.terminal_density:.2f} note/s")
         set_text(

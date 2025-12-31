@@ -597,7 +597,7 @@ class SingleAnalysisTab(QWidget):
             self.metrics_labels["high_density_occupancy_rate"],
             f"{density.high_density_occupancy_rate:.2f} %",
         )
-        self._set_label_text(self.metrics_labels["density_change"], f"{density.density_change:.2f}")
+        self._set_label_text(self.metrics_labels["density_change"], f"{density.density_change:.3f}")
         terminal_available = total_value is not None
         terminal_density_text = f"{density.terminal_density:.2f} note/s" if terminal_available else "-"
         terminal_chm_text = f"{density.terminal_chm_density:.2f} note/s" if terminal_available else "-"
@@ -1366,7 +1366,7 @@ class DifficultyTab(QWidget):
             occupancy_item = SortableTableWidgetItem(f"{density.high_density_occupancy_rate:.2f} %")
             occupancy_item.setData(Qt.ItemDataRole.UserRole, float(density.high_density_occupancy_rate))
             self.table_widget.setItem(row, 8, occupancy_item)
-            density_change_item = SortableTableWidgetItem(f"{density.density_change:.2f}")
+            density_change_item = SortableTableWidgetItem(f"{density.density_change:.3f}")
             density_change_item.setData(Qt.ItemDataRole.UserRole, float(density.density_change))
             self.table_widget.setItem(row, 9, density_change_item)
             term_text = "-" if not terminal_available else f"{density.terminal_density:.2f}"
@@ -1781,9 +1781,33 @@ class DifficultyTab(QWidget):
             return float(analysis.note_count or 0)
         return self._metric_value(analysis, column)
 
+    def _round_for_display(self, column: Optional[str], value: float) -> float:
+        decimal_places: dict[str, int] = {
+            "NOTES数": 0,
+            "TOTAL値": 2,
+            "増加率": 2,
+            "最大秒間密度": 0,
+            "平均密度": 2,
+            "体感密度": 2,
+            "高密度占有率": 2,
+            "密度変化量": 3,
+            "終端密度": 2,
+            "終端体感密度": 2,
+            "突風度数": 2,
+            "終端密度差": 2,
+        }
+        places = decimal_places.get(column or "")
+        return round(value, places) if places is not None else value
+
     def _evaluate_condition(self, value: float, condition: NumericFilterCondition) -> bool:
         if condition.operator == "eq":
-            return condition.value is None or abs(value - condition.value) < 1e-9
+            displayed_value = self._round_for_display(condition.column, value)
+            condition_value = (
+                displayed_value
+                if condition.value is None
+                else self._round_for_display(condition.column, condition.value)
+            )
+            return abs(displayed_value - condition_value) < 1e-9
         if condition.operator == "range":
             if condition.value is None or condition.secondary_value is None:
                 return True
