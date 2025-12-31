@@ -120,3 +120,21 @@ def test_duplicate_notes_collapsed(tmp_path: Path) -> None:
 
     # Same timing, same lane (11 and 51 map to lane 1); should count as one note
     assert len(result.notes) == 1
+
+
+def test_extension_random_notes_are_ignored(tmp_path: Path) -> None:
+    content = """
+#BPM 120
+#RANDOM 2
+#00011:0100
+#ENDRANDOM
+#00011:0001
+    """.strip()
+    file_path = tmp_path / "random_ignore.pms"
+    file_path.write_text(content, encoding="utf-8")
+
+    parser = PMSParser()
+    result = parser.parse(file_path)
+
+    # Notes inside RANDOM blocks should not be counted toward density
+    assert len(result.notes) == 1
