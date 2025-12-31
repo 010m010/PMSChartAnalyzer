@@ -32,6 +32,7 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
         average_density=1.5,
         cms_density=1.5,
         chm_density=1.5,
+        density_change=0.5,
         high_density_occupancy_rate=50.0,
         terminal_density=0.5,
         terminal_rms_density=0.5,

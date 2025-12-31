@@ -15,6 +15,7 @@ class DensityResult:
     average_density: float
     cms_density: float
     chm_density: float
+    density_change: float
     high_density_occupancy_rate: float
     terminal_density: float
     terminal_rms_density: float
@@ -51,6 +52,7 @@ def compute_density(
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
             terminal_rms_density=0.0,
@@ -137,6 +139,12 @@ def compute_density(
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    density_change = 0.0
+    if per_second_total:
+        diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
+        if diffs:
+            mean_diff = sum(diffs) / len(diffs)
+            density_change = mean_diff / (chm_density + epsilon)
     if per_second_total:
         threshold = floor(chm_density)
         occupied_bins = sum(1 for val in per_second_total if val >= threshold)
@@ -193,6 +201,7 @@ def compute_density(
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
@@ -219,6 +228,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "average_density": 0.0,
             "cms_density": 0.0,
             "chm_density": 0.0,
+            "density_change": 0.0,
             "high_density_occupancy_rate": 0.0,
             "terminal_density": 0.0,
             "terminal_rms_density": 0.0,
@@ -239,6 +249,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "average_density": sum(r.average_density for r in totals) / len(totals),
         "cms_density": sum(r.cms_density for r in totals) / len(totals),
         "chm_density": sum(r.chm_density for r in totals) / len(totals),
+        "density_change": sum(r.density_change for r in totals) / len(totals),
         "high_density_occupancy_rate": sum(r.high_density_occupancy_rate for r in totals) / len(totals),
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
         "terminal_rms_density": sum(r.terminal_rms_density for r in totals) / len(totals),

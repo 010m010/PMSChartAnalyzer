@@ -143,6 +143,7 @@ def history_by_difficulty() -> Dict[str, List[DensityResult]]:
                 average_density=float(metrics.get("average_density", 0.0)),
                 cms_density=float(metrics.get("cms_density", 0.0)),
                 chm_density=float(metrics.get("chm_density", 0.0)),
+                density_change=float(metrics.get("density_change", 0.0)),
                 high_density_occupancy_rate=float(metrics.get("high_density_occupancy_rate", 0.0)),
                 terminal_density=float(metrics.get("terminal_density", 0.0)),
                 rms_density=float(metrics.get("rms_density", 0.0)),
@@ -211,6 +212,7 @@ def _recompute_density_metrics(
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
             terminal_rms_density=0.0,
@@ -288,6 +290,12 @@ def _recompute_density_metrics(
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    density_change = 0.0
+    if per_second_total:
+        diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
+        if diffs:
+            mean_diff = sum(diffs) / len(diffs)
+            density_change = mean_diff / (chm_density + epsilon)
     if per_second_total:
         threshold = floor(chm_density)
         occupied_bins = sum(1 for val in per_second_total if val >= threshold)
@@ -342,6 +350,7 @@ def _recompute_density_metrics(
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,

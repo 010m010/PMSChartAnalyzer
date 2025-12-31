@@ -185,6 +185,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
             terminal_rms_density=0.0,
@@ -272,6 +273,12 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
         else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    density_change = 0.0
+    if trimmed:
+        diffs = [abs(trimmed[i] - trimmed[i - 1]) for i in range(1, len(trimmed))]
+        if diffs:
+            mean_diff = sum(diffs) / len(diffs)
+            density_change = mean_diff / (chm_density + epsilon)
 
     mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
     variance = (
@@ -329,6 +336,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
@@ -412,6 +420,7 @@ class PlaygroundDialog(QDialog):
             ("平均密度", "非ゼロビンの平均値。`average = sum(density) / count`"),
             ("体感密度 (CHM)", "二乗平均/一次平均で求める体感指標。`chm = Σn^2 / Σn`"),
             ("高密度占有率", "体感密度を切り捨てた値以上の秒間密度が出る秒数の割合（100分率）。"),
+            ("密度変化量", "秒間密度の隣接差の絶対値平均を CHM で正規化した値。`mean(|Δdensity|)/(chm+ε)`"),
             ("終端範囲", "必要ノーツ数ぶん末尾側の区間。単曲分析と同じ算出ロジック/色でハイライトします。"),
             ("終端密度/終端体感密度", "終端範囲内での平均密度と CHM。"),
             ("全体難度数", "平均密度を標準偏差で割った指標。"),
@@ -485,6 +494,7 @@ class PlaygroundDialog(QDialog):
             ("average_density", "平均密度"),
             ("chm_density", "体感密度"),
             ("high_density_occupancy_rate", "高密度占有率"),
+            ("density_change", "密度変化量"),
             ("terminal_density", "終端密度"),
             ("terminal_chm_density", "終端体感密度"),
         ]
@@ -586,6 +596,7 @@ class PlaygroundDialog(QDialog):
         set_text("average_density", f"{density.average_density:.2f} note/s")
         set_text("chm_density", f"{density.chm_density:.2f} note/s")
         set_text("high_density_occupancy_rate", f"{density.high_density_occupancy_rate:.2f} %")
+        set_text("density_change", f"{density.density_change:.2f}")
         terminal_available = density.terminal_window is not None and density.terminal_window > 0
         set_text("terminal_density", "-" if not terminal_available else f"{density.terminal_density:.2f} note/s")
         set_text(
