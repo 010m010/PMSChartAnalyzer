@@ -294,8 +294,8 @@ def _recompute_density_metrics(
     if per_second_total:
         diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
         if diffs:
-            mean_diff = sum(diffs) / len(diffs)
-            density_change = mean_diff / (chm_density + epsilon)
+            total_diff = sum(diffs)
+            density_change = total_diff / (total_notes + epsilon)
     if per_second_total:
         threshold = floor(chm_density)
         occupied_bins = sum(1 for val in per_second_total if val >= threshold)
