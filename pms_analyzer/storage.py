@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from math import ceil, floor
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -175,59 +176,188 @@ def _density_to_dict(density: DensityResult) -> dict[str, object]:
     return {
         "per_second_total": density.per_second_total,
         "per_second_by_key": density.per_second_by_key,
-        "max_density": density.max_density,
-        "average_density": density.average_density,
-        "cms_density": density.cms_density,
-        "chm_density": density.chm_density,
-        "high_density_occupancy_rate": density.high_density_occupancy_rate,
-        "terminal_density": density.terminal_density,
-        "terminal_rms_density": density.terminal_rms_density,
-        "terminal_cms_density": density.terminal_cms_density,
-        "terminal_chm_density": density.terminal_chm_density,
-        "rms_density": density.rms_density,
         "duration": density.duration,
-        "terminal_window": density.terminal_window,
-        "overall_difficulty": density.overall_difficulty,
-        "terminal_difficulty": density.terminal_difficulty,
-        "terminal_difficulty_cms": density.terminal_difficulty_cms,
-        "terminal_difficulty_chm": density.terminal_difficulty_chm,
-        "terminal_density_difference": density.terminal_density_difference,
-        "gustiness": density.gustiness,
-        "terminal_gustiness": density.terminal_gustiness,
     }
 
 
-def _density_from_dict(data: object) -> Optional[DensityResult]:
+def _density_from_dict(data: object, *, total_value: float | None) -> Optional[DensityResult]:
     if not isinstance(data, dict):
         return None
     try:
         per_second_total = [int(v) for v in data.get("per_second_total", []) or []]
         per_second_by_key = [[int(v) for v in row] for row in data.get("per_second_by_key", []) or []]
-        return DensityResult(
-            per_second_total=per_second_total,
-            per_second_by_key=per_second_by_key,
-            max_density=float(data.get("max_density", 0.0)),
-            average_density=float(data.get("average_density", 0.0)),
-            cms_density=float(data.get("cms_density", 0.0)),
-            chm_density=float(data.get("chm_density", 0.0)),
-            high_density_occupancy_rate=float(data.get("high_density_occupancy_rate", 0.0)),
-            terminal_density=float(data.get("terminal_density", 0.0)),
-            terminal_rms_density=float(data.get("terminal_rms_density", 0.0)),
-            terminal_cms_density=float(data.get("terminal_cms_density", 0.0)),
-            terminal_chm_density=float(data.get("terminal_chm_density", 0.0)),
-            rms_density=float(data.get("rms_density", 0.0)),
-            duration=float(data.get("duration", 0.0)),
-            terminal_window=float(data["terminal_window"]) if data.get("terminal_window") is not None else None,
-            overall_difficulty=float(data.get("overall_difficulty", 0.0)),
-            terminal_difficulty=float(data.get("terminal_difficulty", 0.0)),
-            terminal_difficulty_cms=float(data.get("terminal_difficulty_cms", 0.0)),
-            terminal_difficulty_chm=float(data.get("terminal_difficulty_chm", 0.0)),
-            terminal_density_difference=float(data.get("terminal_density_difference", 0.0)),
-            gustiness=float(data.get("gustiness", 0.0)),
-            terminal_gustiness=float(data.get("terminal_gustiness", 0.0)),
-        )
+        duration = float(data.get("duration", 0.0))
     except (TypeError, ValueError):
         return None
+
+    if per_second_total and not per_second_by_key:
+        per_second_by_key = [[count, 0, 0, 0, 0, 0, 0, 0, 0] for count in per_second_total]
+
+    return _recompute_density_metrics(per_second_total, per_second_by_key, duration, total_value)
+
+
+def _recompute_density_metrics(
+    per_second_total: list[int],
+    per_second_by_key: list[list[int]],
+    duration: float,
+    total_value: float | None,
+) -> DensityResult:
+    epsilon = 1e-6
+    if not per_second_total:
+        return DensityResult(
+            per_second_total=[],
+            per_second_by_key=per_second_by_key,
+            max_density=0.0,
+            average_density=0.0,
+            cms_density=0.0,
+            chm_density=0.0,
+            high_density_occupancy_rate=0.0,
+            terminal_density=0.0,
+            terminal_rms_density=0.0,
+            terminal_cms_density=0.0,
+            terminal_chm_density=0.0,
+            rms_density=0.0,
+            duration=duration,
+            terminal_window=None,
+            overall_difficulty=0.0,
+            terminal_difficulty=0.0,
+            terminal_difficulty_cms=0.0,
+            terminal_difficulty_chm=0.0,
+            terminal_density_difference=0.0,
+            gustiness=0.0,
+            terminal_gustiness=0.0,
+        )
+
+    non_zero_bins = [val for val in per_second_total if val > 0]
+    max_density = max(per_second_total)
+    average_density = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
+
+    terminal_density = 0.0
+    terminal_rms_density = 0.0
+    terminal_cms_density = 0.0
+    terminal_chm_density = 0.0
+    terminal_density_difference = 0.0
+    terminal_max_density = 0.0
+    terminal_gustiness = 0.0
+    terminal_window_used: float | None = None
+    terminal_start_bin = len(per_second_total)
+    bin_size = duration / len(per_second_total) if per_second_total and duration > 0 else 1.0
+    total_notes = sum(per_second_total)
+
+    if total_value is not None and total_notes > 0:
+        gauge_rate = total_value / total_notes
+        if gauge_rate > 0:
+            required_notes = ceil((85.0 - 2.0) / gauge_rate)
+            start_note_index = max(total_notes - required_notes, 0)
+            cumulative = 0
+            for idx, val in enumerate(per_second_total):
+                cumulative += val
+                if cumulative > start_note_index:
+                    terminal_start_bin = idx
+                    break
+            terminal_bins = per_second_total[terminal_start_bin:] if terminal_start_bin < len(per_second_total) else []
+            terminal_window_used = len(terminal_bins) * bin_size if terminal_bins else 0.0
+            note_count_terminal = sum(terminal_bins)
+            if terminal_window_used and terminal_window_used > 0 and note_count_terminal > 0:
+                terminal_density = note_count_terminal / terminal_window_used
+            terminal_max_density = max(terminal_bins) if terminal_bins else 0.0
+            terminal_bins_non_zero = [val for val in terminal_bins if val > 0]
+            if terminal_bins_non_zero:
+                terminal_rms_density = (
+                    sum(val * val for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                ) ** 0.5
+                terminal_cms_density = (
+                    sum(val**3 for val in terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                ) ** (1.0 / 3.0)
+                terminal_chm_density = sum(val * val for val in terminal_bins_non_zero) / sum(terminal_bins_non_zero)
+                terminal_mean_per_second = sum(terminal_bins_non_zero) / len(terminal_bins_non_zero)
+                terminal_variance = (
+                    sum((val - terminal_mean_per_second) ** 2 for val in terminal_bins_non_zero)
+                    / len(terminal_bins_non_zero)
+                )
+                terminal_std_per_second = terminal_variance**0.5
+                if terminal_std_per_second > 0:
+                    terminal_gustiness = (terminal_max_density - terminal_mean_per_second) / (
+                        terminal_std_per_second + epsilon
+                    )
+
+    rms_density = (
+        (sum(val * val for val in non_zero_bins) / len(non_zero_bins)) ** 0.5 if non_zero_bins else 0.0
+    )
+    cms_density = (
+        (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
+    )
+    chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    if per_second_total:
+        threshold = floor(chm_density)
+        occupied_bins = sum(1 for val in per_second_total if val >= threshold)
+        high_density_occupancy_rate = (occupied_bins / len(per_second_total)) * 100
+    else:
+        high_density_occupancy_rate = 0.0
+
+    mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
+    variance = (
+        sum((val - mean_per_second) ** 2 for val in non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
+    )
+    std_per_second = variance**0.5
+
+    non_terminal_bins = per_second_total[:terminal_start_bin]
+    non_terminal_bins_non_zero = [val for val in non_terminal_bins if val > 0]
+    non_terminal_rms = (
+        (sum(val * val for val in non_terminal_bins_non_zero) / len(non_terminal_bins_non_zero)) ** 0.5
+        if non_terminal_bins_non_zero
+        else rms_density
+    )
+    non_terminal_cms = (
+        (sum(val**3 for val in non_terminal_bins_non_zero) / len(non_terminal_bins_non_zero)) ** (1.0 / 3.0)
+        if non_terminal_bins_non_zero
+        else cms_density
+    )
+    non_terminal_chm = (
+        sum(val * val for val in non_terminal_bins_non_zero) / sum(non_terminal_bins_non_zero)
+        if non_terminal_bins_non_zero and sum(non_terminal_bins_non_zero) > 0
+        else chm_density
+    )
+
+    overall_difficulty = mean_per_second / (std_per_second + epsilon) if mean_per_second > 0 else 0.0
+    terminal_difficulty = (
+        (terminal_rms_density - non_terminal_rms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    )
+    terminal_difficulty_cms = (
+        (terminal_cms_density - non_terminal_cms) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    )
+    terminal_difficulty_chm = (
+        (terminal_chm_density - non_terminal_chm) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    )
+    if terminal_window_used is not None:
+        terminal_density_difference = terminal_chm_density - non_terminal_chm
+    gustiness = (max_density - mean_per_second) / (std_per_second + epsilon) if std_per_second > 0 else 0.0
+    if terminal_window_used is None:
+        terminal_gustiness = 0.0
+
+    return DensityResult(
+        per_second_total=per_second_total,
+        per_second_by_key=per_second_by_key,
+        max_density=max_density,
+        average_density=average_density,
+        cms_density=cms_density,
+        chm_density=chm_density,
+        high_density_occupancy_rate=high_density_occupancy_rate,
+        terminal_density=terminal_density,
+        terminal_rms_density=terminal_rms_density,
+        terminal_cms_density=terminal_cms_density,
+        terminal_chm_density=terminal_chm_density,
+        rms_density=rms_density,
+        duration=duration,
+        terminal_window=terminal_window_used,
+        overall_difficulty=overall_difficulty,
+        terminal_difficulty=terminal_difficulty,
+        terminal_difficulty_cms=terminal_difficulty_cms,
+        terminal_difficulty_chm=terminal_difficulty_chm,
+        terminal_density_difference=terminal_density_difference,
+        gustiness=gustiness,
+        terminal_gustiness=terminal_gustiness,
+    )
 
 
 def _serialize_analysis(analysis: ChartAnalysis, index: int) -> dict[str, object]:
@@ -258,9 +388,6 @@ def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyE
             continue
         if not 0 <= index < len(entries):
             continue
-        density = _density_from_dict(item.get("density"))
-        if density is None:
-            continue
         entry = entries[index]
         resolved_raw = item.get("resolved_path")
         resolved_path = Path(str(resolved_raw)) if resolved_raw else None
@@ -274,6 +401,9 @@ def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyE
             total_value_val: Optional[float] = float(total_value) if total_value is not None else None
         except (TypeError, ValueError):
             total_value_val = None
+        density = _density_from_dict(item.get("density"), total_value=total_value_val)
+        if density is None:
+            continue
         entry.note_count = entry.note_count or note_count_val
         entry.total_value = entry.total_value or total_value_val
         analyses.append(
