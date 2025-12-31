@@ -74,6 +74,7 @@ from ..storage import (
 )
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 from .playground_dialog import PlaygroundDialog
+from sip import isdeleted
 
 
 def _metric_color(metric_key: str, value: float | None) -> QColor | None:
@@ -2481,8 +2482,10 @@ class MainWindow(QMainWindow):
             apply_app_palette(app, mode)
         self.single_tab.set_theme_mode(mode)
         self.table_tab.set_theme_mode(mode)
-        if self.playground_dialog:
+        if self.playground_dialog and not isdeleted(self.playground_dialog):
             self.playground_dialog.set_theme_mode(mode)
+        elif self.playground_dialog and isdeleted(self.playground_dialog):
+            self.playground_dialog = None
         if save:
             config = load_config()
             config["theme_mode"] = mode
@@ -2548,6 +2551,8 @@ class MainWindow(QMainWindow):
         self.single_tab.load_file(path)
 
     def _open_playground(self) -> None:
+        if self.playground_dialog and isdeleted(self.playground_dialog):
+            self.playground_dialog = None
         if self.playground_dialog and not self.playground_dialog.isHidden():
             self.playground_dialog.show()
             self.playground_dialog.raise_()
@@ -2555,20 +2560,25 @@ class MainWindow(QMainWindow):
             self.playground_dialog.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
             return
         self.playground_dialog = PlaygroundDialog(self, theme_mode=self.theme_mode)
-        self.playground_dialog.finished.connect(lambda _: self.setFocus(Qt.FocusReason.ActiveWindowFocusReason))
+        self.playground_dialog.finished.connect(lambda _: self._on_playground_closed())
+        self.playground_dialog.destroyed.connect(lambda: self._on_playground_closed())
         self.playground_dialog.show()
+
+    def _on_playground_closed(self) -> None:
+        self.playground_dialog = None
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
     def _refresh_songdata_label(self) -> None:
         # Backward compatibility: call the public method used by MainWindow
         self.refresh_songdata_label()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self.playground_dialog:
+        if self.playground_dialog and not isdeleted(self.playground_dialog):
             try:
                 self.playground_dialog.close()
             except Exception:
                 pass
-            self.playground_dialog = None
+        self.playground_dialog = None
         super().closeEvent(event)
 
 
