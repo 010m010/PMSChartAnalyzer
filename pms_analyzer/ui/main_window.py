@@ -1765,37 +1765,11 @@ class DifficultyTab(QWidget):
             header.setSectionHidden(idx, hidden)
 
     def _load_filter_state(self) -> None:
-        config = load_config()
-        filters = config.get("difficulty_filters")
-        operator_keys = {op for op, _ in FILTER_OPERATORS}
-        conditions: list[NumericFilterCondition] = []
-        if isinstance(filters, dict):
-            raw_conditions = filters.get("conditions")
-            if isinstance(raw_conditions, list):
-                for item in raw_conditions[:MAX_FILTER_CONDITIONS]:
-                    if not isinstance(item, dict):
-                        continue
-                    column = item.get("column") if item.get("column") in FILTERABLE_COLUMNS else None
-                    operator = item.get("operator") if item.get("operator") in operator_keys else "eq"
-                    value = item.get("value")
-                    secondary_value = item.get("secondary_value")
-                    conditions.append(
-                        NumericFilterCondition(
-                            column=column,
-                            operator=operator or "eq",
-                            value=self._safe_float(value),
-                            secondary_value=self._safe_float(secondary_value),
-                        )
-                    )
-            self._song_filter_query = str(filters.get("song_query") or "")
-            saved_levels = filters.get("level_selection")
-            if isinstance(saved_levels, list):
-                self._filter_selection = {str(level) for level in saved_levels}
-            self._saved_show_unresolved = bool(filters.get("show_unresolved", False))
-            self._saved_show_total_undefined = bool(filters.get("show_total_undefined", False))
-        if not conditions:
-            conditions = [NumericFilterCondition()]
-        self._filter_conditions = conditions[:MAX_FILTER_CONDITIONS]
+        conditions: list[NumericFilterCondition] = [NumericFilterCondition()]
+        self._song_filter_query = ""
+        self._filter_selection = set()
+        self._saved_show_unresolved = False
+        self._saved_show_total_undefined = False
         for checkbox, value in (
             (self.show_unresolved_checkbox, self._saved_show_unresolved),
             (self.show_total_undefined_checkbox, self._saved_show_total_undefined),
@@ -1806,27 +1780,8 @@ class DifficultyTab(QWidget):
         self._update_filter_indicator()
 
     def _save_filter_state(self) -> None:
-        config = load_config()
-        filters = config.get("difficulty_filters")
-        if not isinstance(filters, dict):
-            filters = {}
-        filters["song_query"] = self._song_filter_query
-        filters["conditions"] = [
-            {
-                "column": condition.column,
-                "operator": condition.operator,
-                "value": condition.value,
-                "secondary_value": condition.secondary_value,
-            }
-            for condition in self._filter_conditions[:MAX_FILTER_CONDITIONS]
-        ]
-        filters["level_selection"] = sorted(self._filter_selection)
-        filters["show_unresolved"] = self.show_unresolved_checkbox.isChecked()
-        filters["show_total_undefined"] = self.show_total_undefined_checkbox.isChecked()
-        self._saved_show_unresolved = filters["show_unresolved"]
-        self._saved_show_total_undefined = filters["show_total_undefined"]
-        config["difficulty_filters"] = filters
-        save_config(config)
+        self._saved_show_unresolved = self.show_unresolved_checkbox.isChecked()
+        self._saved_show_total_undefined = self.show_total_undefined_checkbox.isChecked()
 
     def _update_filter_indicator(self) -> None:
         if self._is_filter_active():
