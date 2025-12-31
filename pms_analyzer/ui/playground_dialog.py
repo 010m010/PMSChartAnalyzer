@@ -448,15 +448,16 @@ class PlaygroundDialog(QDialog):
               font-family: "Noto Sans JP", "Noto Sans", "Segoe UI", system-ui, sans-serif;
               color: {fg};
               background: {bg};
+              font-size: 14px;
               line-height: 1.65;
             }}
             h1 {{
               margin: 0 0 16px;
-              font-size: 20px;
+              font-size: 18px;
             }}
             h2 {{
               margin: 18px 0 8px;
-              font-size: 16px;
+              font-size: 15px;
             }}
             p {{
               margin: 6px 0;
@@ -464,17 +465,27 @@ class PlaygroundDialog(QDialog):
             .formula {{
               margin: 8px 0 2px 16px;
             }}
+            .formula-note {{
+              margin: 0 0 10px 16px;
+              font-size: 13px;
+            }}
+            .table-container {{
+              margin: 10px 0;
+              overflow-x: auto;
+            }}
             table {{
               border-collapse: collapse;
-              margin: 10px 0;
               width: 100%;
-              max-width: 560px;
+              max-width: 900px;
+              min-width: 640px;
               background: {subtle_bg};
+              table-layout: auto;
             }}
             th, td {{
               border: 1px solid {border};
               padding: 6px 8px;
               text-align: left;
+              white-space: nowrap;
             }}
             th {{
               background: {border};
@@ -495,8 +506,10 @@ class PlaygroundDialog(QDialog):
             <p>秒間密度＝0 の区間はゲームに影響を与えないという考えから、算出対象区間から除外します。</p>
             <p><b>平均密度</b>は曲全体の秒間密度の算術平均です。</p>
             <p class="formula">$$\\text{{平均密度}} = \\frac{{\\sum n_t}}{{|T_{{nz}}|}} \\quad (n_t:\\text{{秒間密度}},\\ T_{{nz}}:\\text{{非ゼロ区間の集合}})$$</p>
+            <p class="formula-note">ここで \\(n_t\\) は秒間密度、\\(|T_{nz}|\\) は密度が 0 ではない区間数を表します。</p>
             <p>クリアゲージの増減量は高密度区間の方が多いという特徴があるため、休憩地帯の影響を強く受ける平均密度ではプレイ感と乖離が生まれるケースがあります。そこで高密度区間に重みを付けた反調和平均（Contra Harmonic Mean）を<b>体感密度</b>として算出します。</p>
             <p class="formula">$$\\text{{体感密度 (CHM)}} = \\frac{{\\sum n_t^2}}{{\\sum n_t}}$$</p>
+            <p class="formula-note">分子の \\(\\sum n_t^2\\) は密度に二乗の重み付けをし、高密度区間を強調しています。分母の \\(\\sum n_t\\) は全体の密度の合計です。</p>
             <p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>
           </section>
 
@@ -515,6 +528,7 @@ class PlaygroundDialog(QDialog):
             <h2>高密度占有率</h2>
             <p>曲全体を通して、秒間密度が体感密度以上となった区間が全体の何 % を占めているかを表したものです。ここで算出に使用している体感密度は小数点を切り捨てています。</p>
             <p class="formula">$$\\text{{占有率}} = \\frac{{\\left|\\{{ t \\mid n_t \\ge \\lfloor chm \\rfloor \\}}\\right|}}{{|T|}} \\times 100$$</p>
+            <p class="formula-note">\\(n_t\\) は秒間密度、\\(\\lfloor chm \\rfloor\\) は体感密度の小数点切り捨て値、\\(|T|\\) は全区間数を表します。</p>
             <p>この占有率が高いほど全体難的な傾向にあり、低いほど局所難的な傾向にあります。</p>
           </section>
 
@@ -522,34 +536,39 @@ class PlaygroundDialog(QDialog):
             <h2>密度変化量</h2>
             <p>曲全体を通して、秒間密度がどれだけ変化したかを表したものです。秒間密度の総変化量（L1 距離）を総ノート数で割って正規化しています。</p>
             <p class="formula">$$\\text{{密度変化量}} = \\frac{{\\sum |n_t - n_{{t-1}}|}}{{\\text{{NOTES}} + \\varepsilon}}$$</p>
+            <p class="formula-note">\\(n_t\\) は時刻 \\(t\\) の秒間密度、\\(n_{t-1}\\) は 1 秒前の秒間密度です。分母の <code>NOTES</code> は総ノート数、\\(\\varepsilon\\) は 0 除算を避けるための極小値です。</p>
             <p>高密度占有率と組み合わせてみることで、秒間密度チャートの形状を予想することができます。</p>
           </section>
 
           <section>
             <h2>占有率 × 変化量の目安</h2>
-            <table>
-              <thead>
-                <tr><th>高密度占有率</th><th>密度変化量</th><th>秒間密度チャートの傾向</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>高</td><td>高</td><td>高密度区間と低密度区間が短い周期で持続的に続く</td></tr>
-                <tr><td>高</td><td>低</td><td>高密度区間と休憩地帯のメリハリがはっきり、あるいはフラットな形状</td></tr>
-                <tr><td>低</td><td>高</td><td>高密度局所発狂が複数回存在している（低密度区間が揺れている場合もある）</td></tr>
-                <tr><td>低</td><td>低</td><td>非常に高い密度の局所発狂と、長い低密度区間から構成されている</td></tr>
-              </tbody>
-            </table>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr><th>高密度占有率</th><th>密度変化量</th><th>秒間密度チャートの傾向</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>高</td><td>高</td><td>高密度区間と低密度区間が短い周期で持続的に続く</td></tr>
+                  <tr><td>高</td><td>低</td><td>高密度区間と休憩地帯のメリハリがはっきり、あるいはフラットな形状</td></tr>
+                  <tr><td>低</td><td>高</td><td>高密度局所発狂が複数回存在している（低密度区間が揺れている場合もある）</td></tr>
+                  <tr><td>低</td><td>低</td><td>非常に高い密度の局所発狂と、長い低密度区間から構成されている</td></tr>
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section>
             <h2>突風度数</h2>
             <p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>
             <p class="formula">$$\\text{{突風度数}} = \\frac{{\\max(n_t) - \\bar{{n}}}}{{\\sigma + \\varepsilon}}$$</p>
+            <p class="formula-note">\\(\\max(n_t)\\) は最大秒間密度、\\(\\bar{n}\\) は秒間密度の平均、\\(\\sigma\\) は秒間密度の標準偏差、\\(\\varepsilon\\) は 0 除算回避用の極小値です。</p>
           </section>
 
           <section>
             <h2>終端密度差</h2>
             <p>終端体感密度と非終端体感密度の差です。値が大きいほどラス殺しの傾向が強く、小さいほどラストに大きい回復がある傾向が強いです。</p>
             <p class="formula">$$\\text{{終端密度差}} = chm_{{terminal}} - chm_{{non-terminal}}$$</p>
+            <p class="formula-note">\\(chm_{terminal}\\) は終端範囲内の体感密度、\\(chm_{non-terminal}\\) は終端外の体感密度を表します。</p>
           </section>
 
           <script>
