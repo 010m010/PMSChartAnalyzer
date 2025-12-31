@@ -52,6 +52,15 @@ class ParseResult:
     file_path: Path
 
 
+@dataclass
+class _ConditionBlock:
+    type: str
+    parent_active: bool
+    current_active: bool
+    matched_branch: bool
+    switch_value: int | None = None
+
+
 class PMSParser:
     header_pattern = re.compile(r"^#(\w+)(?::|\s+)?(.*)$", re.IGNORECASE)
     line_pattern = re.compile(r"^#(\d{3})(\d{2}):(.+)$")
@@ -78,17 +87,18 @@ class PMSParser:
         subartist = ""
         rank: int | None = None
         level = ""
-        conditional_depth = 0
+        random_stack: List[int | None] = []
+        condition_stack: List[_ConditionBlock] = []
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line or line.startswith("//"):
                 continue
 
-            conditional_depth, handled = self._handle_extension_command(line, conditional_depth)
+            handled = self._handle_extension_command(line, condition_stack, random_stack)
             if handled:
                 continue
-            if conditional_depth > 0:
+            if not self._is_currently_active(condition_stack):
                 continue
 
             line_match = self.line_pattern.match(line)
@@ -182,18 +192,132 @@ class PMSParser:
                 continue
         return path.read_text(errors="ignore")
 
-    def _handle_extension_command(self, line: str, conditional_depth: int) -> tuple[int, bool]:
+    def _handle_extension_command(
+        self, line: str, condition_stack: List["_ConditionBlock"], random_stack: List[int | None]
+    ) -> bool:
         match = self.extension_command_pattern.match(line)
         if not match:
-            return conditional_depth, False
+            return False
 
         command = match.group(1).upper()
-        if command in {"RANDOM", "SETRANDOM", "IF", "SWITCH"}:
-            conditional_depth += 1
-        elif command in {"ENDIF", "ENDSWITCH", "ENDRANDOM"}:
-            conditional_depth = max(conditional_depth - 1, 0)
+        argument = line[match.end() :].strip()
+        if command == "RANDOM":
+            self._push_random(argument, random_stack)
+        elif command == "SETRANDOM":
+            self._set_random(argument, random_stack)
+        elif command == "ENDRANDOM":
+            if random_stack:
+                random_stack.pop()
+        elif command == "IF":
+            parent_active = self._is_currently_active(condition_stack)
+            condition_result = parent_active and self._evaluate_condition(argument, random_stack)
+            condition_stack.append(
+                _ConditionBlock(
+                    type="if",
+                    parent_active=parent_active,
+                    current_active=condition_result,
+                    matched_branch=condition_result,
+                )
+            )
+        elif command == "ELSEIF":
+            if condition_stack and condition_stack[-1].type == "if":
+                block = condition_stack[-1]
+                if not block.parent_active:
+                    block.current_active = False
+                elif block.matched_branch:
+                    block.current_active = False
+                else:
+                    condition_result = self._evaluate_condition(argument, random_stack)
+                    block.current_active = condition_result
+                    block.matched_branch = condition_result
+        elif command == "ELSE":
+            if condition_stack and condition_stack[-1].type == "if":
+                block = condition_stack[-1]
+                if not block.parent_active or block.matched_branch:
+                    block.current_active = False
+                else:
+                    block.current_active = True
+                    block.matched_branch = True
+        elif command == "ENDIF":
+            if condition_stack and condition_stack[-1].type == "if":
+                condition_stack.pop()
+        elif command == "SWITCH":
+            parent_active = self._is_currently_active(condition_stack)
+            switch_value = self._parse_int_argument(argument)
+            if switch_value is None:
+                switch_value = random_stack[-1] if random_stack else None
+            condition_stack.append(
+                _ConditionBlock(
+                    type="switch",
+                    parent_active=parent_active,
+                    current_active=False,
+                    matched_branch=False,
+                    switch_value=switch_value,
+                )
+            )
+        elif command == "CASE":
+            if condition_stack and condition_stack[-1].type == "switch":
+                block = condition_stack[-1]
+                case_value = self._parse_int_argument(argument)
+                if (
+                    block.parent_active
+                    and not block.matched_branch
+                    and case_value is not None
+                    and case_value == block.switch_value
+                ):
+                    block.current_active = True
+                    block.matched_branch = True
+                else:
+                    block.current_active = False
+        elif command == "DEFAULT":
+            if condition_stack and condition_stack[-1].type == "switch":
+                block = condition_stack[-1]
+                if block.parent_active and not block.matched_branch:
+                    block.current_active = True
+                    block.matched_branch = True
+                else:
+                    block.current_active = False
+        elif command == "ENDSWITCH":
+            if condition_stack and condition_stack[-1].type == "switch":
+                condition_stack.pop()
 
-        return conditional_depth, True
+        return True
+
+    def _push_random(self, argument: str, random_stack: List[int | None]) -> None:
+        value = self._parse_int_argument(argument)
+        if value is None or value > 0:
+            random_stack.append(1)
+        else:
+            random_stack.append(None)
+
+    def _set_random(self, argument: str, random_stack: List[int | None]) -> None:
+        value = self._parse_int_argument(argument)
+        selected_value = 1 if value is None else value
+        if random_stack:
+            random_stack[-1] = selected_value
+        else:
+            random_stack.append(selected_value)
+
+    def _evaluate_condition(self, argument: str, random_stack: List[int | None]) -> bool:
+        condition_value = self._parse_int_argument(argument)
+        current_random = random_stack[-1] if random_stack else None
+        if current_random is not None:
+            return condition_value is not None and current_random == condition_value
+        if condition_value is None:
+            return False
+        return condition_value != 0
+
+    def _parse_int_argument(self, argument: str) -> int | None:
+        if not argument:
+            return None
+        token = argument.split()[0]
+        try:
+            return int(token)
+        except ValueError:
+            return None
+
+    def _is_currently_active(self, condition_stack: List["_ConditionBlock"]) -> bool:
+        return all(block.current_active for block in condition_stack)
 
     def _convert_to_notes(
         self,
