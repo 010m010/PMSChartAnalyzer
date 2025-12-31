@@ -55,6 +55,10 @@ class ParseResult:
 class PMSParser:
     header_pattern = re.compile(r"^#(\w+)(?::|\s+)?(.*)$", re.IGNORECASE)
     line_pattern = re.compile(r"^#(\d{3})(\d{2}):(.+)$")
+    extension_command_pattern = re.compile(
+        r"^#\s*(RANDOM|SETRANDOM|IF|ELSEIF|ELSE|ENDIF|SWITCH|CASE|DEFAULT|ENDSWITCH|ENDRANDOM)\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, *, default_bpm: float = 130.0) -> None:
         self.default_bpm = default_bpm
@@ -74,10 +78,17 @@ class PMSParser:
         subartist = ""
         rank: int | None = None
         level = ""
+        conditional_depth = 0
 
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line or line.startswith("//"):
+                continue
+
+            conditional_depth, handled = self._handle_extension_command(line, conditional_depth)
+            if handled:
+                continue
+            if conditional_depth > 0:
                 continue
 
             line_match = self.line_pattern.match(line)
@@ -170,6 +181,19 @@ class PMSParser:
             except UnicodeDecodeError:
                 continue
         return path.read_text(errors="ignore")
+
+    def _handle_extension_command(self, line: str, conditional_depth: int) -> tuple[int, bool]:
+        match = self.extension_command_pattern.match(line)
+        if not match:
+            return conditional_depth, False
+
+        command = match.group(1).upper()
+        if command in {"RANDOM", "SETRANDOM", "IF", "SWITCH"}:
+            conditional_depth += 1
+        elif command in {"ENDIF", "ENDSWITCH", "ENDRANDOM"}:
+            conditional_depth = max(conditional_depth - 1, 0)
+
+        return conditional_depth, True
 
     def _convert_to_notes(
         self,
