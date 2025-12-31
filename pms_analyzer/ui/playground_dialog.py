@@ -375,6 +375,7 @@ class PlaygroundDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.theme_mode = theme_mode
         self._current_total = DEFAULT_TOTAL
+        self._using_default_total = True
         self._result: PlaygroundResult | None = None
         self._build_ui()
         self._apply_theme(theme_mode)
@@ -451,10 +452,10 @@ class PlaygroundDialog(QDialog):
 
         control_layout = QHBoxLayout()
         total_label = QLabel("TOTAL")
-        self.total_input = QLineEdit(str(DEFAULT_TOTAL))
+        self.total_input = QLineEdit()
         self.total_input.setValidator(QIntValidator(1, 1000, self))
-        self.total_input.setPlaceholderText("1～1000 (未入力時は 300)")
-        self.total_status = QLabel("1～1000 の整数を入力してください")
+        self.total_input.setPlaceholderText("1～1000 の整数を入力（未入力時は 300 を適用）")
+        self.total_status = QLabel("未入力時は 300 を適用します")
         self.total_status.setStyleSheet("color: gray;")
         control_layout.addWidget(total_label)
         control_layout.addWidget(self.total_input)
@@ -468,6 +469,7 @@ class PlaygroundDialog(QDialog):
         outer.addWidget(self.canvas)
 
         self.chart = StackedDensityChart(self)
+        self.chart.set_selection_enabled(False)
         outer.addWidget(self.chart)
 
         metrics_group = self._build_metrics_group()
@@ -477,7 +479,7 @@ class PlaygroundDialog(QDialog):
         container.setLayout(outer)
 
         self.canvas.bars_updated.connect(self._on_bars_updated)
-        self.total_input.editingFinished.connect(self._on_total_changed)
+        self.total_input.textChanged.connect(self._on_total_changed)
         clear_button.clicked.connect(self.canvas.clear)
         return container
 
@@ -488,6 +490,7 @@ class PlaygroundDialog(QDialog):
 
         left_labels = [
             ("notes", "NOTES数"),
+            ("applied_total", "適用 TOTAL 値"),
             ("rate", "増加率 (/notes)"),
             ("max_density", "最大瞬間密度"),
         ]
@@ -534,16 +537,15 @@ class PlaygroundDialog(QDialog):
         return group
 
     def _on_total_changed(self) -> None:
-        total_value = self._parse_total()
-        if total_value is None:
-            self.total_status.setText("未入力/不正のため 300 を適用しました")
+        total_value, used_default = self._resolved_total()
+        self._current_total = total_value
+        self._using_default_total = used_default
+        if used_default:
+            self.total_status.setText("未入力/不正のため 300 を適用しています")
             self.total_status.setStyleSheet("color: #cc2f2f;")
-            self._current_total = DEFAULT_TOTAL
-            self.total_input.setText(str(DEFAULT_TOTAL))
         else:
             self.total_status.setText("1～1000 の整数を入力してください")
             self.total_status.setStyleSheet("color: gray;")
-            self._current_total = total_value
         self._recompute()
 
     def _on_bars_updated(self, bars: list[int]) -> None:
@@ -560,6 +562,12 @@ class PlaygroundDialog(QDialog):
         if 1 <= value <= 1000:
             return value
         return None
+
+    def _resolved_total(self) -> tuple[int, bool]:
+        parsed = self._parse_total()
+        if parsed is None:
+            return DEFAULT_TOTAL, True
+        return parsed, False
 
     def _recompute(self, bars: Optional[list[int]] = None) -> None:
         per_second = bars if bars is not None else self.canvas.bars()
@@ -584,8 +592,16 @@ class PlaygroundDialog(QDialog):
                 label.setText(text)
                 label.setToolTip(text)
 
+        applied_total_text = (
+            f"{self._current_total} (未入力時の既定値)" if self._using_default_total else f"{self._current_total}"
+        )
+        set_text("applied_total", applied_total_text)
+
         if not density:
-            for label in self.metric_labels.values():
+            for key, label in self.metric_labels.items():
+                if key == "applied_total":
+                    label.setToolTip(applied_total_text)
+                    continue
                 label.setText("-")
                 label.setToolTip("-")
             return

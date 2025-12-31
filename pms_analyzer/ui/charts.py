@@ -45,6 +45,7 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._bar_colors: list[str] = []
         self._selection_callback: Optional[Callable[[float, float], None]] = None
         self._selection_artist = None
+        self._selection_enabled = True
         self._x_limits: tuple[float, float] | None = None
         self._selected_bins: tuple[int, int] | None = None
         self._last_plot_state: dict[str, object] | None = None
@@ -187,10 +188,22 @@ class StackedDensityChart(FigureCanvasQTAgg):
     def set_selection_callback(self, callback: Optional[Callable[[float, float], None]]) -> None:
         self._selection_callback = callback
 
+    def set_selection_enabled(self, enabled: bool) -> None:
+        self._selection_enabled = enabled
+        if self._span_selector:
+            try:
+                self._span_selector.set_active(enabled)
+            except Exception:
+                pass
+        if not enabled:
+            self._clear_selection()
+
     def clear_selection(self) -> None:
         self._clear_selection()
 
     def _on_span_select(self, x_min: float, x_max: float) -> None:
+        if not self._selection_enabled:
+            return
         if x_min is None or x_max is None:
             return
         span_start, span_end = sorted([x_min, x_max])
