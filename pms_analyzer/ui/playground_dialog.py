@@ -592,19 +592,20 @@ class PlaygroundDialog(QDialog):
         container = QWidget()
         outer = QVBoxLayout()
 
+        intro_label = QLabel("グリッド上にマウスで好きなグラフを描いて各指標の動きを見てみよう！")
+        intro_label.setWordWrap(True)
+        outer.addWidget(intro_label)
+
         control_layout = QHBoxLayout()
         total_label = QLabel("TOTAL")
         self.total_input = QLineEdit()
         self.total_input.setValidator(QIntValidator(1, 1000, self))
         self.total_input.setPlaceholderText("1～1000 の整数を入力（未入力時は 300 を適用）")
-        self.total_status = QLabel("未入力時は 300 を適用します")
-        self.total_status.setStyleSheet("color: gray;")
         control_layout.addWidget(total_label)
         control_layout.addWidget(self.total_input)
         clear_button = QPushButton("クリア")
         control_layout.addWidget(clear_button)
         control_layout.addStretch()
-        control_layout.addWidget(self.total_status)
         outer.addLayout(control_layout)
 
         self.canvas = FreehandDensityCanvas(self)
@@ -632,7 +633,7 @@ class PlaygroundDialog(QDialog):
 
         left_labels = [
             ("notes", "NOTES数"),
-            ("applied_total", "適用 TOTAL 値"),
+            ("applied_total", "TOTAL"),
             ("rate", "増加率 (/notes)"),
             ("max_density", "最大瞬間密度"),
         ]
@@ -680,12 +681,6 @@ class PlaygroundDialog(QDialog):
         total_value, used_default = self._resolved_total()
         self._current_total = total_value
         self._using_default_total = used_default
-        if used_default:
-            self.total_status.setText("未入力/不正のため 300 を適用しています")
-            self.total_status.setStyleSheet("color: #cc2f2f;")
-        else:
-            self.total_status.setText("1～1000 の整数を入力してください")
-            self.total_status.setStyleSheet("color: gray;")
         self._recompute()
 
     def _on_bars_updated(self, bars: list[int]) -> None:
@@ -719,7 +714,7 @@ class PlaygroundDialog(QDialog):
     def _render_chart(self, result: PlaygroundResult) -> None:
         self.chart.plot(
             result.per_second_by_key,
-            title="用語説明",
+            title=None,
             total_time=result.total_time_for_chart,
             terminal_window=result.terminal_window_for_chart,
             show_smoothed_line=True,

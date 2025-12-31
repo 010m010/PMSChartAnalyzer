@@ -136,10 +136,8 @@ class StackedDensityChart(FigureCanvasQTAgg):
         self._bars = self.ax.bar(x, totals, color=colors, width=self._bar_width)
         grid = "#555555" if dark else "#b8c5d3"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
-        if title:
+        if title is not None:
             self.ax.set_title(title, color="#e6e6e6" if dark else "#1D2835")
-        else:
-            self.ax.set_title("秒間密度", color="#e6e6e6" if dark else "#1D2835")
         if total_time and terminal_window:
             start = max(total_time - terminal_window, 0)
             start_bin = int(start)
