@@ -561,7 +561,7 @@ class PlaygroundDialog(QDialog):
             <h2>突風度数</h2>
             <p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>
             <p class="formula">$$\\text{{突風度数}} = \\frac{{\\max(n_t) - \\bar{{n}}}}{{\\sigma + \\varepsilon}}$$</p>
-            <p class="formula-note">\\(\\max(n_t)\\) は最大秒間密度、\\(\\bar{n}\\) は秒間密度の平均、\\(\\sigma\\) は秒間密度の標準偏差、\\(\\varepsilon\\) は 0 除算回避用の極小値です。</p>
+            <p class="formula-note">\\(\\max(n_t)\\) は最大秒間密度、\\(\\bar{{n}}\\) は秒間密度の平均、\\(\\sigma\\) は秒間密度の標準偏差、\\(\\varepsilon\\) は 0 除算回避用の極小値です。</p>
           </section>
 
           <section>
