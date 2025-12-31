@@ -15,18 +15,25 @@
 - 推奨パッケージは `requirements.txt` を参照
 
 ## セットアップ
+Windows:
 ```bash
 python -m venv .venv
 . .venv/Scripts/activate  # PowerShell の場合は .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 ```
-もしくは Windows では `setup.bat` をダブルクリックしてください。
+macOS / Linux:
+```bash
+python3 -m venv .venv
+source ./.venv/bin/activate
+pip install -r requirements.txt
+```
+もしくは Windows では `setup.bat` を、macOS / Linux では `./setup.sh` を実行してください。
 
 ## 使い方
 ```bash
 python main.py
 ```
-Windows では `run.bat` をダブルクリックするだけでも起動できます。
+Windows では `run.bat` をダブルクリックするだけでも起動できます。macOS / Linux では `./run.sh` を実行してください。
 1. 起動後、左側タブの「単曲分析」で .pms / .bms をウィンドウにドラッグ＆ドロップします。
 2. 解析が終わると、上部に積み上げ棒グラフ、下部に密度メトリクスが表示されます。
 3. 「難易度表」タブでは公開 URL を入力して難易度表を取得し、一括解析と箱ひげ図表示ができます（保存された URL から再選択も可能です）。
