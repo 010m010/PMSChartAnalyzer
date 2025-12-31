@@ -173,6 +173,23 @@ def _per_second_by_key_from_total(per_second_total: list[int]) -> list[list[int]
     return per_second_by_key
 
 
+def _fraction_html(numerator: str, denominator: str) -> str:
+    font_style = "font-family: 'Noto Sans Mono', 'Roboto Mono', 'Source Code Pro', monospace;"
+    return (
+        "<table style=\"display:inline-table;border-collapse:collapse;vertical-align:middle;\">"
+        f"<tr><td style=\"text-align:center;padding:0 6px;{font_style}\">{numerator}</td></tr>"
+        f"<tr><td style=\"border-top:1px solid currentColor;text-align:center;padding:2px 6px;{font_style}\">{denominator}</td></tr>"
+        "</table>"
+    )
+
+
+def _monospace_html(content: str) -> str:
+    return (
+        "<span style=\"font-family: 'Noto Sans Mono', 'Roboto Mono', 'Source Code Pro', monospace;\">"
+        f"{content}</span>"
+    )
+
+
 def compute_playground_density(per_second_total: list[int], total_value: int | None) -> PlaygroundResult:
     epsilon = 1e-6
     total_notes = sum(per_second_total)

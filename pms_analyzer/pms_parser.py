@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import re
@@ -285,10 +286,14 @@ class PMSParser:
 
     def _push_random(self, argument: str, random_stack: List[int | None]) -> None:
         value = self._parse_int_argument(argument)
-        if value is None or value > 0:
-            random_stack.append(1)
+        if value is None:
+            selected_value = 1
+        elif value > 0:
+            selected_value = 1
         else:
-            random_stack.append(None)
+            selected_value = None
+
+        random_stack.append(selected_value)
 
     def _set_random(self, argument: str, random_stack: List[int | None]) -> None:
         value = self._parse_int_argument(argument)
