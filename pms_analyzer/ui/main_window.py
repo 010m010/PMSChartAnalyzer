@@ -77,30 +77,6 @@ from .playground_dialog import PlaygroundDialog
 from PyQt6.sip import isdeleted
 
 
-def _metric_color(metric_key: str, value: float | None) -> QColor | None:
-    if value is None:
-        return None
-    if metric_key == "terminal_density_difference":
-        if value > 0.5:
-            return QColor("#cc2f2f")
-        if value > 0.2:
-            return QColor("#e67a73")
-        if value < -0.5:
-            return QColor("#2f6bcc")
-        if value < -0.2:
-            return QColor("#74a2e6")
-        return None
-    if metric_key == "gustiness":
-        if value >= 3.0:
-            return QColor("#cc2f2f")
-        if value >= 2.0:
-            return QColor("#e67a73")
-        if value >= 1.0:
-            return QColor("#f2b8b5")
-        return None
-    return None
-
-
 def _mean(values: List[float | int]) -> float:
     return mean(values) if values else 0.0
 
@@ -430,17 +406,6 @@ class SingleAnalysisTab(QWidget):
         label.setText(text)
         label.setToolTip(text)
 
-    def _apply_metric_label_colors(self, values: Dict[str, float | None]) -> None:
-        for key in ("gustiness", "terminal_density_difference", "high_density_occupancy_rate"):
-            label = self.metrics_labels.get(key)
-            if not label:
-                continue
-            color = _metric_color(key, values.get(key))
-            if color:
-                label.setStyleSheet(f"color: {color.name()}")
-            else:
-                label.setStyleSheet("")
-
     def set_theme_mode(self, mode: str) -> None:
         self.chart.set_theme_mode(mode)
         self.chart.draw()
@@ -609,12 +574,6 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.metrics_labels["gustiness"], f"{density.gustiness:.2f}")
         terminal_density_diff_text = "-" if terminal_density_difference_value is None else f"{terminal_density_difference_value:.2f}"
         self._set_label_text(self.metrics_labels["terminal_density_difference"], terminal_density_diff_text)
-        self._apply_metric_label_colors(
-            {
-                "gustiness": density.gustiness,
-                "terminal_density_difference": terminal_density_difference_value,
-            }
-        )
         self._reset_range_metrics()
 
     def _on_toggle_smoothed_line(self, checked: bool) -> None:
@@ -1381,7 +1340,6 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 11, term_chm_item)
             gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
             gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
-            self._apply_metric_item_color(gust_item, "gustiness", density.gustiness)
             terminal_density_diff_value: float | None = (
                 density.terminal_density_difference if terminal_available else None
             )
@@ -1393,9 +1351,6 @@ class DifficultyTab(QWidget):
             )
             terminal_density_diff_item = SortableTableWidgetItem(terminal_density_diff_text)
             terminal_density_diff_item.setData(Qt.ItemDataRole.UserRole, terminal_density_diff_sort)
-            self._apply_metric_item_color(
-                terminal_density_diff_item, "terminal_density_difference", terminal_density_diff_value
-            )
             self.table_widget.setItem(row, 12, gust_item)
             self.table_widget.setItem(row, 13, terminal_density_diff_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
@@ -1534,11 +1489,6 @@ class DifficultyTab(QWidget):
                 return analysis.total_value / analysis.note_count
             return None
         return None
-
-    def _apply_metric_item_color(self, item: QTableWidgetItem, metric_key: str, value: float | None) -> None:
-        color = _metric_color(metric_key, value)
-        if color:
-            item.setForeground(color)
 
     def _overlay_value_for_metric(self, metric: str) -> float | None:
         if not self._single_overlay_density:
