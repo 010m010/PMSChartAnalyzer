@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
 )
 import requests
 
+from .. import __version__
 from ..analysis import DensityResult, compute_density
 from ..range_stats import calculate_range_selection_stats
 from ..difficulty_table import (
@@ -2301,7 +2302,7 @@ class DifficultyTab(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("PMS Chart Analyzer")
+        self.setWindowTitle(f"PMS Chart Analyzer v{__version__}")
         self.resize(1100, 720)
         self.setAcceptDrops(True)
         self.parser = PMSParser()
@@ -2460,6 +2461,8 @@ def run_app() -> None:
     import sys
 
     app = QApplication(sys.argv)
+    app.setApplicationName("PMS Chart Analyzer")
+    app.setApplicationVersion(__version__)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
