@@ -152,6 +152,7 @@ FILTERABLE_COLUMNS = [
     "平均密度",
     "体感密度",
     "高密度占有率",
+    "密度変化量",
     "終端密度",
     "終端体感密度",
     "全体難度数",
@@ -368,6 +369,7 @@ class SingleAnalysisTab(QWidget):
             ("average_density", "平均密度"),
             ("chm_density", "体感密度"),
             ("high_density_occupancy_rate", "高密度占有率"),
+            ("density_change", "密度変化量"),
             ("terminal_density", "終端密度"),
             ("terminal_chm_density", "終端体感密度"),
             ("overall_difficulty", "全体難度数"),
@@ -576,6 +578,7 @@ class SingleAnalysisTab(QWidget):
                 "average_density": density.average_density,
                 "cms_density": density.cms_density,
                 "chm_density": density.chm_density,
+                "density_change": density.density_change,
                 "high_density_occupancy_rate": density.high_density_occupancy_rate,
                 "terminal_density": density.terminal_density,
                 "terminal_rms_density": density.terminal_rms_density,
@@ -613,6 +616,7 @@ class SingleAnalysisTab(QWidget):
             self.metrics_labels["high_density_occupancy_rate"],
             f"{density.high_density_occupancy_rate:.2f} %",
         )
+        self._set_label_text(self.metrics_labels["density_change"], f"{density.density_change:.2f}")
         terminal_available = total_value is not None
         terminal_density_text = f"{density.terminal_density:.2f} note/s" if terminal_available else "-"
         terminal_chm_text = f"{density.terminal_chm_density:.2f} note/s" if terminal_available else "-"
@@ -850,6 +854,7 @@ class DifficultyTab(QWidget):
             "平均密度",
             "体感密度",
             "高密度占有率",
+            "密度変化量",
             "終端密度",
             "終端体感密度",
             "全体難度数",
@@ -889,6 +894,7 @@ class DifficultyTab(QWidget):
                 "平均密度",
                 "体感密度",
                 "高密度占有率",
+                "密度変化量",
                 "終端密度",
                 "終端体感密度",
                 "全体難度数",
@@ -920,6 +926,7 @@ class DifficultyTab(QWidget):
                 "平均密度",
                 "体感密度",
                 "高密度占有率",
+                "密度変化量",
                 "終端密度",
                 "終端体感密度",
                 "全体難度数",
@@ -1389,16 +1396,19 @@ class DifficultyTab(QWidget):
             occupancy_item = SortableTableWidgetItem(f"{density.high_density_occupancy_rate:.2f} %")
             occupancy_item.setData(Qt.ItemDataRole.UserRole, float(density.high_density_occupancy_rate))
             self.table_widget.setItem(row, 8, occupancy_item)
+            density_change_item = SortableTableWidgetItem(f"{density.density_change:.2f}")
+            density_change_item.setData(Qt.ItemDataRole.UserRole, float(density.density_change))
+            self.table_widget.setItem(row, 9, density_change_item)
             term_text = "-" if not terminal_available else f"{density.terminal_density:.2f}"
             term_sort = float("-inf") if not terminal_available else float(density.terminal_density)
             term_item = SortableTableWidgetItem(term_text)
             term_item.setData(Qt.ItemDataRole.UserRole, term_sort)
-            self.table_widget.setItem(row, 9, term_item)
+            self.table_widget.setItem(row, 10, term_item)
             term_chm_text = "-" if not terminal_available else f"{density.terminal_chm_density:.2f}"
             term_chm_sort = float("-inf") if not terminal_available else float(density.terminal_chm_density)
             term_chm_item = SortableTableWidgetItem(term_chm_text)
             term_chm_item.setData(Qt.ItemDataRole.UserRole, term_chm_sort)
-            self.table_widget.setItem(row, 10, term_chm_item)
+            self.table_widget.setItem(row, 11, term_chm_item)
             overall_item = SortableTableWidgetItem(f"{density.overall_difficulty:.2f}")
             overall_item.setData(Qt.ItemDataRole.UserRole, float(density.overall_difficulty))
             self._apply_metric_item_color(overall_item, "overall_difficulty", density.overall_difficulty)
@@ -1426,20 +1436,20 @@ class DifficultyTab(QWidget):
             self._apply_metric_item_color(
                 terminal_density_diff_item, "terminal_density_difference", terminal_density_diff_value
             )
-            self.table_widget.setItem(row, 11, overall_item)
-            self.table_widget.setItem(row, 12, gust_item)
-            self.table_widget.setItem(row, 13, terminal_gust_item)
-            self.table_widget.setItem(row, 14, terminal_density_diff_item)
+            self.table_widget.setItem(row, 12, overall_item)
+            self.table_widget.setItem(row, 13, gust_item)
+            self.table_widget.setItem(row, 14, terminal_gust_item)
+            self.table_widget.setItem(row, 15, terminal_density_diff_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 15, md5_item)
+            self.table_widget.setItem(row, 16, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 16, sha_item)
+            self.table_widget.setItem(row, 17, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 17, path_item)
+            self.table_widget.setItem(row, 18, path_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1545,6 +1555,8 @@ class DifficultyTab(QWidget):
             return density.chm_density
         if metric == "高密度占有率":
             return density.high_density_occupancy_rate
+        if metric == "密度変化量":
+            return density.density_change
         if metric == "終端密度":
             if not terminal_available:
                 return None
@@ -1591,6 +1603,8 @@ class DifficultyTab(QWidget):
             return density.chm_density
         if metric == "高密度占有率":
             return density.high_density_occupancy_rate
+        if metric == "密度変化量":
+            return density.density_change
         if metric == "終端密度":
             if not terminal_available:
                 return None
