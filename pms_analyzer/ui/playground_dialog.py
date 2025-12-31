@@ -275,10 +275,11 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
     density_change = 0.0
     if trimmed:
-        diffs = [abs(trimmed[i] - trimmed[i - 1]) for i in range(1, len(trimmed))]
+        change_series = [0] + trimmed + [0]
+        diffs = [abs(change_series[i] - change_series[i - 1]) for i in range(1, len(change_series))]
         if diffs:
-            mean_diff = sum(diffs) / len(diffs)
-            density_change = mean_diff / (total_notes + epsilon)
+            total_diff = sum(diffs)
+            density_change = total_diff / (total_notes + epsilon)
 
     mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
     variance = (
@@ -420,7 +421,7 @@ class PlaygroundDialog(QDialog):
             ("平均密度", "非ゼロビンの平均値。`average = sum(density) / count`"),
             ("体感密度 (CHM)", "二乗平均/一次平均で求める体感指標。`chm = Σn^2 / Σn`"),
             ("高密度占有率", "体感密度を切り捨てた値以上の秒間密度が出る秒数の割合（100分率）。"),
-            ("密度変化量", "秒間密度の隣接差の絶対値平均を NOTES 数で正規化した値。`mean(|Δdensity|)/(notes+ε)`"),
+            ("密度変化量", "秒間密度の隣接差の絶対値和を NOTES 数で正規化した値。`sum(|Δdensity|)/(notes+ε)`"),
             ("終端範囲", "必要ノーツ数ぶん末尾側の区間。単曲分析と同じ算出ロジック/色でハイライトします。"),
             ("終端密度/終端体感密度", "終端範囲内での平均密度と CHM。"),
             ("全体難度数", "平均密度を標準偏差で割った指標。"),

@@ -142,10 +142,11 @@ def compute_density(
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
     density_change = 0.0
     if per_second_total:
-        diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
+        change_series = [0] + per_second_total + [0]
+        diffs = [abs(change_series[i] - change_series[i - 1]) for i in range(1, len(change_series))]
         if diffs:
-            mean_diff = sum(diffs) / len(diffs)
-            density_change = mean_diff / (note_count + epsilon)
+            total_diff = sum(diffs)
+            density_change = total_diff / (note_count + epsilon)
     if per_second_total:
         threshold = floor(chm_density)
         occupied_bins = sum(1 for val in per_second_total if val >= threshold)
