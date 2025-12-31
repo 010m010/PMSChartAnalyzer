@@ -425,9 +425,7 @@ class PlaygroundDialog(QDialog):
             ("密度変化量", "秒間密度の隣接差の絶対値和を NOTES 数で正規化した値。`sum(|Δdensity|)/(notes+ε)`"),
             ("終端範囲", "必要ノーツ数ぶん末尾側の区間。単曲分析と同じ算出ロジック/色でハイライトします。"),
             ("終端密度/終端体感密度", "終端範囲内での平均密度と CHM。"),
-            ("全体難度数", "平均密度を標準偏差で割った指標。"),
             ("突風度数", "ピーク密度と平均密度の差を標準偏差で正規化。`(max-avg)/std`"),
-            ("終端突風度数", "終端範囲内の突風度数。"),
             ("終端密度差", "終端 CHM と非終端 CHM の差。"),
         ]
 
@@ -503,9 +501,7 @@ class PlaygroundDialog(QDialog):
             ("terminal_chm_density", "終端体感密度"),
         ]
         right_labels = [
-            ("overall_difficulty", "全体難度数"),
             ("gustiness", "突風度数"),
-            ("terminal_gustiness", "終端突風度数"),
             ("terminal_density_difference", "終端密度差"),
         ]
 
@@ -620,9 +616,7 @@ class PlaygroundDialog(QDialog):
             "terminal_chm_density",
             "-" if not terminal_available else f"{density.terminal_chm_density:.2f} note/s",
         )
-        set_text("overall_difficulty", f"{density.overall_difficulty:.2f}")
         set_text("gustiness", f"{density.gustiness:.2f}")
-        set_text("terminal_gustiness", "-" if not terminal_available else f"{density.terminal_gustiness:.2f}")
         density_diff_text = "-" if not terminal_available else f"{density.terminal_density_difference:.2f}"
         set_text("terminal_density_difference", density_diff_text)
 
