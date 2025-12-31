@@ -125,8 +125,12 @@ def test_duplicate_notes_collapsed(tmp_path: Path) -> None:
 def test_extension_random_notes_are_ignored(tmp_path: Path) -> None:
     content = """
 #BPM 120
-#RANDOM 2
+#RANDOM 3
+#IF 1
 #00011:0100
+#ELSEIF 2
+#00011:0001
+#ENDIF
 #ENDRANDOM
 #00011:0001
     """.strip()
@@ -136,5 +140,31 @@ def test_extension_random_notes_are_ignored(tmp_path: Path) -> None:
     parser = PMSParser()
     result = parser.parse(file_path)
 
-    # Notes inside RANDOM blocks should not be counted toward density
+    # RANDOM should deterministically choose the smallest case number (1)
+    assert len(result.notes) == 2
+    assert result.notes[0].time < result.notes[1].time
+    assert result.notes[0].key_index == result.notes[1].key_index
+
+
+def test_switch_selects_first_case_with_random(tmp_path: Path) -> None:
+    content = """
+#BPM 120
+#RANDOM 2
+#SWITCH
+#CASE 1
+#00011:0100
+#CASE 2
+#00011:0001
+#DEFAULT
+#00011:0001
+#ENDSWITCH
+#ENDRANDOM
+    """.strip()
+    file_path = tmp_path / "switch_random.pms"
+    file_path.write_text(content, encoding="utf-8")
+
+    parser = PMSParser()
+    result = parser.parse(file_path)
+
+    # With RANDOM, the first case should be chosen, so only the first note is kept
     assert len(result.notes) == 1
