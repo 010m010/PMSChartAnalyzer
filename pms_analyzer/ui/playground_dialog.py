@@ -173,6 +173,23 @@ def _per_second_by_key_from_total(per_second_total: list[int]) -> list[list[int]
     return per_second_by_key
 
 
+def _fraction_html(numerator: str, denominator: str) -> str:
+    font_style = "font-family: 'Noto Sans Mono', 'Roboto Mono', 'Source Code Pro', monospace;"
+    return (
+        "<table style=\"display:inline-table;border-collapse:collapse;vertical-align:middle;\">"
+        f"<tr><td style=\"text-align:center;padding:0 6px;{font_style}\">{numerator}</td></tr>"
+        f"<tr><td style=\"border-top:1px solid currentColor;text-align:center;padding:2px 6px;{font_style}\">{denominator}</td></tr>"
+        "</table>"
+    )
+
+
+def _monospace_html(content: str) -> str:
+    return (
+        "<span style=\"font-family: 'Noto Sans Mono', 'Roboto Mono', 'Source Code Pro', monospace;\">"
+        f"{content}</span>"
+    )
+
+
 def compute_playground_density(per_second_total: list[int], total_value: int | None) -> PlaygroundResult:
     epsilon = 1e-6
     total_notes = sum(per_second_total)
@@ -414,6 +431,14 @@ class PlaygroundDialog(QDialog):
         header.setFont(font)
         vbox.addWidget(header)
 
+        average_formula = _fraction_html("∑ n_t", "|T_{nz}|")
+        chm_formula = _fraction_html("∑ n_t^2", "∑ n_t")
+        occupancy_numerator = _monospace_html("t | n_t ≥ ⌊chm⌋")
+        occupancy_formula = _fraction_html(f"|{{{occupancy_numerator}}}|", "|T|")
+        density_change_formula = _fraction_html("∑ |n_t - n_{t-1}|", "NOTES + ε")
+        gustiness_formula = _fraction_html("max(n_t) - n̄", "σ + ε")
+        terminal_difference_formula = _monospace_html("chm_terminal - chm_non-terminal")
+
         sections = [
             (
                 "秒間密度の算出方法",
@@ -425,15 +450,15 @@ class PlaygroundDialog(QDialog):
             ),
             (
                 "平均密度と体感密度",
-                dedent(
-                    """
-                    <p>秒間密度＝0 の区間はゲームに影響を与えないという考えから、算出対象区間から除外します。</p>
-                    <p><b>平均密度</b>は曲全体の秒間密度の算術平均です。</p>
-                    <p style="margin-left:1em;"><code>平均密度 = \dfrac{\sum n_t}{|T_{nz}|}</code>（<code>n_t</code>: 秒間密度, <code>T_{nz}</code>: 非ゼロ区間の集合）</p>
-                    <p>クリアゲージの増減量は高密度区間の方が多いという特徴があるため、休憩地帯の影響を強く受ける平均密度ではプレイ感と乖離が生まれるケースがあります。そこで高密度区間に重みを付けた反調和平均（Contra Harmonic Mean）を<b>体感密度</b>として算出します。</p>
-                    <p style="margin-left:1em;"><code>体感密度 (CHM) = \dfrac{\sum n_t^2}{\sum n_t}</code></p>
-                    <p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>
-                    """
+                (
+                    "<p>秒間密度＝0 の区間はゲームに影響を与えないという考えから、算出対象区間から除外します。</p>"
+                    "<p><b>平均密度</b>は曲全体の秒間密度の算術平均です。</p>"
+                    f"<p style=\"margin-left:1em;\">平均密度 = {average_formula}"
+                    f"（{_monospace_html('n_t')}: 秒間密度, {_monospace_html('T_{nz}')}: 非ゼロ区間の集合）</p>"
+                    "<p>クリアゲージの増減量は高密度区間の方が多いという特徴があるため、休憩地帯の影響を強く受ける平均密度ではプレイ感と乖離が生まれるケースがあります。"
+                    "そこで高密度区間に重みを付けた反調和平均（Contra Harmonic Mean）を<b>体感密度</b>として算出します。</p>"
+                    f"<p style=\"margin-left:1em;\">体感密度 (CHM) = {chm_formula}</p>"
+                    "<p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>"
                 ),
             ),
             (
@@ -455,22 +480,18 @@ class PlaygroundDialog(QDialog):
             ),
             (
                 "高密度占有率",
-                dedent(
-                    """
-                    <p>曲全体を通して、秒間密度が体感密度以上となった区間が全体の何 % を占めているかを表したものです。ここで算出に使用している体感密度は小数点を切り捨てています。</p>
-                    <p style="margin-left:1em;"><code>占有率 = \dfrac{\left|\{t \mid n_t \ge \lfloor chm \rfloor\}\right|}{|T|} \times 100</code></p>
-                    <p>この占有率が高いほど全体難的な傾向にあり、低いほど局所難的な傾向にあります。</p>
-                    """
+                (
+                    "<p>曲全体を通して、秒間密度が体感密度以上となった区間が全体の何 % を占めているかを表したものです。ここで算出に使用している体感密度は小数点を切り捨てています。</p>"
+                    f"<p style=\"margin-left:1em;\">占有率 = {occupancy_formula} × 100</p>"
+                    "<p>この占有率が高いほど全体難的な傾向にあり、低いほど局所難的な傾向にあります。</p>"
                 ),
             ),
             (
                 "密度変化量",
-                dedent(
-                    """
-                    <p>曲全体を通して、秒間密度がどれだけ変化したかを表したものです。秒間密度の総変化量（L1 距離）を総ノート数で割って正規化しています。</p>
-                    <p style="margin-left:1em;"><code>密度変化量 = \dfrac{\sum |n_t - n_{t-1}|}{\text{NOTES} + \varepsilon}</code></p>
-                    <p>高密度占有率と組み合わせてみることで、秒間密度チャートの形状を予想することができます。</p>
-                    """
+                (
+                    "<p>曲全体を通して、秒間密度がどれだけ変化したかを表したものです。秒間密度の総変化量（L1 距離）を総ノート数で割って正規化しています。</p>"
+                    f"<p style=\"margin-left:1em;\">密度変化量 = {density_change_formula}</p>"
+                    "<p>高密度占有率と組み合わせてみることで、秒間密度チャートの形状を予想することができます。</p>"
                 ),
             ),
             (
@@ -493,20 +514,16 @@ class PlaygroundDialog(QDialog):
             ),
             (
                 "突風度数",
-                dedent(
-                    """
-                    <p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>
-                    <p style="margin-left:1em;"><code>突風度数 = \dfrac{\max(n_t) - \overline{n}}{\sigma + \varepsilon}</code></p>
-                    """
+                (
+                    "<p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>"
+                    f"<p style=\"margin-left:1em;\">突風度数 = {gustiness_formula}</p>"
                 ),
             ),
             (
                 "終端密度差",
-                dedent(
-                    """
-                    <p>終端体感密度と非終端体感密度の差です。値が大きいほどラス殺しの傾向が強く、小さいほどラストに大きい回復がある傾向が強いです。</p>
-                    <p style="margin-left:1em;"><code>終端密度差 = chm_{terminal} - chm_{non-terminal}</code></p>
-                    """
+                (
+                    "<p>終端体感密度と非終端体感密度の差です。値が大きいほどラス殺しの傾向が強く、小さいほどラストに大きい回復がある傾向が強いです。</p>"
+                    f"<p style=\"margin-left:1em;\">終端密度差 = {terminal_difference_formula}</p>"
                 ),
             ),
         ]
@@ -671,7 +688,7 @@ class PlaygroundDialog(QDialog):
                 label.setToolTip(text)
 
         applied_total_text = (
-            f"{self._current_total} (未入力時の既定値)" if self._using_default_total else f"{self._current_total}"
+            f"{self._current_total}" if not self._using_default_total else f"{self._current_total}"
         )
         set_text("applied_total", applied_total_text)
 
