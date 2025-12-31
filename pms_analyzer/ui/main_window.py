@@ -74,7 +74,7 @@ from ..storage import (
 )
 from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
 from .playground_dialog import PlaygroundDialog
-from sip import isdeleted
+from PyQt6.sip import isdeleted
 
 
 def _metric_color(metric_key: str, value: float | None) -> QColor | None:
