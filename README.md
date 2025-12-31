@@ -1,4 +1,4 @@
-# PMSChartAnalyzer
+# PMSChartAnalyzer v1.0.0
 
 9key/PMS 譜面専用のチャート分析アプリケーションです。
 pmsファイルを読み込んで秒間密度チャートを確認できるほか、難易度表とbeatorajaのsongdata.dbを連携することでローカルフォルダのpmsファイルを一括分析、グラフ表示、一覧表示することができます。
