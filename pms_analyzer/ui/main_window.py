@@ -146,9 +146,9 @@ FILTERABLE_COLUMNS = [
     "体感密度",
     "高密度占有率",
     "密度変化量",
+    "突風度数",
     "終端密度",
     "終端体感密度",
-    "突風度数",
     "終端密度差",
 ]
 
@@ -361,9 +361,9 @@ class SingleAnalysisTab(QWidget):
             ("chm_density", "体感密度"),
             ("high_density_occupancy_rate", "高密度占有率"),
             ("density_change", "密度変化量"),
+            ("gustiness", "突風度数"),
             ("terminal_density", "終端密度"),
             ("terminal_chm_density", "終端体感密度"),
-            ("gustiness", "突風度数"),
             ("terminal_density_difference", "終端密度差"),
         ]
         for row, (key, title) in enumerate(labels):
@@ -831,9 +831,9 @@ class DifficultyTab(QWidget):
             "体感密度",
             "高密度占有率",
             "密度変化量",
+            "突風度数",
             "終端密度",
             "終端体感密度",
-            "突風度数",
             "終端密度差",
             "md5",
             "sha256",
@@ -869,9 +869,9 @@ class DifficultyTab(QWidget):
                 "体感密度",
                 "高密度占有率",
                 "密度変化量",
+                "突風度数",
                 "終端密度",
                 "終端体感密度",
-                "突風度数",
                 "終端密度差",
             ]
         )
@@ -899,9 +899,9 @@ class DifficultyTab(QWidget):
                 "体感密度",
                 "高密度占有率",
                 "密度変化量",
+                "突風度数",
                 "終端密度",
                 "終端体感密度",
-                "突風度数",
                 "終端密度差",
             ]
         )

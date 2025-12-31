@@ -622,11 +622,11 @@ class PlaygroundDialog(QDialog):
             ("chm_density", "体感密度"),
             ("high_density_occupancy_rate", "高密度占有率"),
             ("density_change", "密度変化量"),
+            ("gustiness", "突風度数"),
             ("terminal_density", "終端密度"),
             ("terminal_chm_density", "終端体感密度"),
         ]
         right_labels = [
-            ("gustiness", "突風度数"),
             ("terminal_density_difference", "終端密度差"),
         ]
 
