@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil, floor
-from textwrap import dedent
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -25,6 +24,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from ..analysis import DensityResult
 from ..theme import apply_app_palette
@@ -402,7 +402,8 @@ class PlaygroundDialog(QDialog):
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
         tabs = QTabWidget()
-        tabs.addTab(self._build_explanation_tab(), "説明")
+        self._explanation_view = self._build_explanation_tab()
+        tabs.addTab(self._explanation_view, "説明")
         tabs.addTab(self._build_play_tab(), "プレイエリア")
         tabs.currentChanged.connect(lambda _: self._reset_tab_scroll(tabs))
         layout.addWidget(tabs)
@@ -411,7 +412,9 @@ class PlaygroundDialog(QDialog):
 
     def _reset_tab_scroll(self, tabs: QTabWidget) -> None:
         widget = tabs.currentWidget()
-        if isinstance(widget, QScrollArea):
+        if isinstance(widget, QWebEngineView):
+            widget.page().runJavaScript("window.scrollTo(0, 0);")
+        elif isinstance(widget, QScrollArea):
             widget.verticalScrollBar().setValue(0)
         else:
             scrolls = widget.findChildren(QScrollArea)
@@ -419,129 +422,152 @@ class PlaygroundDialog(QDialog):
                 scroll.verticalScrollBar().setValue(0)
 
     def _build_explanation_tab(self) -> QWidget:
-        container = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        inner = QWidget()
-        vbox = QVBoxLayout()
-        header = QLabel("指標の定義と計算方法")
-        font: QFont = header.font()
-        font.setPointSize(font.pointSize() + 1)
-        font.setBold(True)
-        header.setFont(font)
-        vbox.addWidget(header)
+        view = QWebEngineView()
+        view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        view.setHtml(self._explanation_html())
+        return view
 
-        average_formula = _fraction_html("∑ n_t", "|T_{nz}|")
-        chm_formula = _fraction_html("∑ n_t^2", "∑ n_t")
-        occupancy_numerator = _monospace_html("t | n_t ≥ ⌊chm⌋")
-        occupancy_formula = _fraction_html(f"|{{{occupancy_numerator}}}|", "|T|")
-        density_change_formula = _fraction_html("∑ |n_t - n_{t-1}|", "NOTES + ε")
-        gustiness_formula = _fraction_html("max(n_t) - n̄", "σ + ε")
-        terminal_difference_formula = _monospace_html("chm_terminal - chm_non-terminal")
+    def _explanation_html(self) -> str:
+        palette = self.palette()
+        fg = palette.color(QPalette.ColorRole.WindowText).name()
+        bg = palette.color(QPalette.ColorRole.Base).name()
+        border = palette.color(QPalette.ColorRole.Mid).name()
+        subtle_bg = palette.color(QPalette.ColorRole.AlternateBase).name()
+        return f"""
+        <!doctype html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8" />
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+          <style>
+            body {{
+              margin: 0;
+              padding: 18px 20px;
+              font-family: "Noto Sans JP", "Noto Sans", "Segoe UI", system-ui, sans-serif;
+              color: {fg};
+              background: {bg};
+              line-height: 1.65;
+            }}
+            h1 {{
+              margin: 0 0 16px;
+              font-size: 20px;
+            }}
+            h2 {{
+              margin: 18px 0 8px;
+              font-size: 16px;
+            }}
+            p {{
+              margin: 6px 0;
+            }}
+            .formula {{
+              margin: 8px 0 2px 16px;
+            }}
+            table {{
+              border-collapse: collapse;
+              margin: 10px 0;
+              width: 100%;
+              max-width: 560px;
+              background: {subtle_bg};
+            }}
+            th, td {{
+              border: 1px solid {border};
+              padding: 6px 8px;
+              text-align: left;
+            }}
+            th {{
+              background: {border};
+              color: {bg};
+            }}
+          </style>
+        </head>
+        <body>
+          <h1>指標の定義と計算方法</h1>
 
-        sections = [
-            (
-                "秒間密度の算出方法",
-                dedent(
-                    """
-                    <p>譜面の 1 ノーツ目を始点として、<b>1 秒ごと</b>の区間におけるノーツ数を秒間密度とします。</p>
-                    """
-                ),
-            ),
-            (
-                "平均密度と体感密度",
-                (
-                    "<p>秒間密度＝0 の区間はゲームに影響を与えないという考えから、算出対象区間から除外します。</p>"
-                    "<p><b>平均密度</b>は曲全体の秒間密度の算術平均です。</p>"
-                    f"<p style=\"margin-left:1em;\">平均密度 = {average_formula}"
-                    f"（{_monospace_html('n_t')}: 秒間密度, {_monospace_html('T_{nz}')}: 非ゼロ区間の集合）</p>"
-                    "<p>クリアゲージの増減量は高密度区間の方が多いという特徴があるため、休憩地帯の影響を強く受ける平均密度ではプレイ感と乖離が生まれるケースがあります。"
-                    "そこで高密度区間に重みを付けた反調和平均（Contra Harmonic Mean）を<b>体感密度</b>として算出します。</p>"
-                    f"<p style=\"margin-left:1em;\">体感密度 (CHM) = {chm_formula}</p>"
-                    "<p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>"
-                ),
-            ),
-            (
-                "終端の定義",
-                dedent(
-                    """
-                    <p>終端密度や終端体感密度などで登場する「終端」とは、譜面の終端からノーツを数えたときに、beatoraja 9key モードのクリアゲージが最低値 2 からクリア基準 85 に達するようなゲージ増加量となる範囲を、1 秒区間単位で抜き出したものです。</p>
-                    <p>単曲分析画面のグラフでは、その終端範囲が領域で示されています。</p>
-                    """
-                ),
-            ),
-            (
-                "終端密度/終端体感密度",
-                dedent(
-                    """
-                    <p>平均密度および体感密度を、終端範囲内で算出したものになります。</p>
-                    """
-                ),
-            ),
-            (
-                "高密度占有率",
-                (
-                    "<p>曲全体を通して、秒間密度が体感密度以上となった区間が全体の何 % を占めているかを表したものです。ここで算出に使用している体感密度は小数点を切り捨てています。</p>"
-                    f"<p style=\"margin-left:1em;\">占有率 = {occupancy_formula} × 100</p>"
-                    "<p>この占有率が高いほど全体難的な傾向にあり、低いほど局所難的な傾向にあります。</p>"
-                ),
-            ),
-            (
-                "密度変化量",
-                (
-                    "<p>曲全体を通して、秒間密度がどれだけ変化したかを表したものです。秒間密度の総変化量（L1 距離）を総ノート数で割って正規化しています。</p>"
-                    f"<p style=\"margin-left:1em;\">密度変化量 = {density_change_formula}</p>"
-                    "<p>高密度占有率と組み合わせてみることで、秒間密度チャートの形状を予想することができます。</p>"
-                ),
-            ),
-            (
-                "占有率 × 変化量の目安",
-                dedent(
-                    """
-                    <table border="1" cellspacing="0" cellpadding="4">
-                      <thead>
-                        <tr><th>高密度占有率</th><th>密度変化量</th><th>秒間密度チャートの傾向</th></tr>
-                      </thead>
-                      <tbody>
-                        <tr><td>高</td><td>高</td><td>高密度区間と低密度区間が短い周期で持続的に続く</td></tr>
-                        <tr><td>高</td><td>低</td><td>高密度区間と休憩地帯のメリハリがはっきり、あるいはフラットな形状</td></tr>
-                        <tr><td>低</td><td>高</td><td>高密度局所発狂が複数回存在している（低密度区間が揺れている場合もある）</td></tr>
-                        <tr><td>低</td><td>低</td><td>非常に高い密度の局所発狂と、長い低密度区間から構成されている</td></tr>
-                      </tbody>
-                    </table>
-                    """
-                ),
-            ),
-            (
-                "突風度数",
-                (
-                    "<p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>"
-                    f"<p style=\"margin-left:1em;\">突風度数 = {gustiness_formula}</p>"
-                ),
-            ),
-            (
-                "終端密度差",
-                (
-                    "<p>終端体感密度と非終端体感密度の差です。値が大きいほどラス殺しの傾向が強く、小さいほどラストに大きい回復がある傾向が強いです。</p>"
-                    f"<p style=\"margin-left:1em;\">終端密度差 = {terminal_difference_formula}</p>"
-                ),
-            ),
-        ]
+          <section>
+            <h2>秒間密度の算出方法</h2>
+            <p>譜面の 1 ノーツ目を始点として、<b>1 秒ごと</b>の区間におけるノーツ数を秒間密度とします。</p>
+          </section>
 
-        for title, desc in sections:
-            title_label = QLabel(title)
-            title_font = title_label.font()
-            title_font.setBold(True)
-            title_label.setFont(title_font)
-            body = QLabel(desc)
-            body.setWordWrap(True)
-            vbox.addWidget(title_label)
-            vbox.addWidget(body)
+          <section>
+            <h2>平均密度と体感密度</h2>
+            <p>秒間密度＝0 の区間はゲームに影響を与えないという考えから、算出対象区間から除外します。</p>
+            <p><b>平均密度</b>は曲全体の秒間密度の算術平均です。</p>
+            <p class="formula">$$\\text{{平均密度}} = \\frac{{\\sum n_t}}{{|T_{{nz}}|}} \\quad (n_t:\\text{{秒間密度}},\\ T_{{nz}}:\\text{{非ゼロ区間の集合}})$$</p>
+            <p>クリアゲージの増減量は高密度区間の方が多いという特徴があるため、休憩地帯の影響を強く受ける平均密度ではプレイ感と乖離が生まれるケースがあります。そこで高密度区間に重みを付けた反調和平均（Contra Harmonic Mean）を<b>体感密度</b>として算出します。</p>
+            <p class="formula">$$\\text{{体感密度 (CHM)}} = \\frac{{\\sum n_t^2}}{{\\sum n_t}}$$</p>
+            <p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>
+          </section>
 
-        vbox.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
-        inner.setLayout(vbox)
-        scroll.setWidget(inner)
-        return scroll
+          <section>
+            <h2>終端の定義</h2>
+            <p>終端密度や終端体感密度などで登場する「終端」とは、譜面の終端からノーツを数えたときに、beatoraja 9key モードのクリアゲージが最低値 2 からクリア基準 85 に達するようなゲージ増加量となる範囲を、1 秒区間単位で抜き出したものです。</p>
+            <p>単曲分析画面のグラフでは、その終端範囲が領域で示されています。</p>
+          </section>
+
+          <section>
+            <h2>終端密度/終端体感密度</h2>
+            <p>平均密度および体感密度を、終端範囲内で算出したものになります。</p>
+          </section>
+
+          <section>
+            <h2>高密度占有率</h2>
+            <p>曲全体を通して、秒間密度が体感密度以上となった区間が全体の何 % を占めているかを表したものです。ここで算出に使用している体感密度は小数点を切り捨てています。</p>
+            <p class="formula">$$\\text{{占有率}} = \\frac{{\\left|\\{{ t \\mid n_t \\ge \\lfloor chm \\rfloor \\}}\\right|}}{{|T|}} \\times 100$$</p>
+            <p>この占有率が高いほど全体難的な傾向にあり、低いほど局所難的な傾向にあります。</p>
+          </section>
+
+          <section>
+            <h2>密度変化量</h2>
+            <p>曲全体を通して、秒間密度がどれだけ変化したかを表したものです。秒間密度の総変化量（L1 距離）を総ノート数で割って正規化しています。</p>
+            <p class="formula">$$\\text{{密度変化量}} = \\frac{{\\sum |n_t - n_{{t-1}}|}}{{\\text{{NOTES}} + \\varepsilon}}$$</p>
+            <p>高密度占有率と組み合わせてみることで、秒間密度チャートの形状を予想することができます。</p>
+          </section>
+
+          <section>
+            <h2>占有率 × 変化量の目安</h2>
+            <table>
+              <thead>
+                <tr><th>高密度占有率</th><th>密度変化量</th><th>秒間密度チャートの傾向</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>高</td><td>高</td><td>高密度区間と低密度区間が短い周期で持続的に続く</td></tr>
+                <tr><td>高</td><td>低</td><td>高密度区間と休憩地帯のメリハリがはっきり、あるいはフラットな形状</td></tr>
+                <tr><td>低</td><td>高</td><td>高密度局所発狂が複数回存在している（低密度区間が揺れている場合もある）</td></tr>
+                <tr><td>低</td><td>低</td><td>非常に高い密度の局所発狂と、長い低密度区間から構成されている</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h2>突風度数</h2>
+            <p>最大秒間密度が、譜面全体に対してどれだけ突出しているかを示す値です。</p>
+            <p class="formula">$$\\text{{突風度数}} = \\frac{{\\max(n_t) - \\bar{{n}}}}{{\\sigma + \\varepsilon}}$$</p>
+          </section>
+
+          <section>
+            <h2>終端密度差</h2>
+            <p>終端体感密度と非終端体感密度の差です。値が大きいほどラス殺しの傾向が強く、小さいほどラストに大きい回復がある傾向が強いです。</p>
+            <p class="formula">$$\\text{{終端密度差}} = chm_{{terminal}} - chm_{{non-terminal}}$$</p>
+          </section>
+
+          <script>
+            window.addEventListener('load', function() {{
+              if (typeof renderMathInElement === 'function') {{
+                renderMathInElement(document.body, {{
+                  delimiters: [
+                    {{left: "$$", right: "$$", display: true}},
+                    {{left: "\\\\(", right: "\\\\)", display: false}}
+                  ],
+                  throwOnError: false
+                }});
+              }}
+            }});
+          </script>
+        </body>
+        </html>
+        """
 
     def _build_play_tab(self) -> QWidget:
         container = QWidget()
