@@ -22,8 +22,8 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
         artist="Tester",
         md5="abc",
         sha256="def",
-        total_value=100.0,
-        note_count=200,
+        total_value=120.0,
+        note_count=3,
     )
     density = DensityResult(
         per_second_total=[1, 2],
@@ -69,6 +69,11 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
     assert url in raw_cache
     assert "analyses" in raw_cache[url]
     assert raw_cache[url]["analyses"]
+    assert set(raw_cache[url]["analyses"][0]["density"].keys()) == {
+        "per_second_total",
+        "per_second_by_key",
+        "duration",
+    }
 
     cached = storage.load_cached_difficulty_data(url)
     assert cached is not None
@@ -76,5 +81,7 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
     assert cached.analyses
     loaded_analysis = cached.analyses[0]
     assert loaded_analysis.density.per_second_total == density.per_second_total
-    assert loaded_analysis.density.high_density_occupancy_rate == density.high_density_occupancy_rate
+    assert loaded_analysis.density.high_density_occupancy_rate == 100.0
+    assert loaded_analysis.density.average_density == 1.5
+    assert loaded_analysis.density.terminal_density == 1.5
     assert loaded_analysis.resolved_path == entry.chart_path
