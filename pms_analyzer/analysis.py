@@ -70,6 +70,7 @@ def compute_density(
             terminal_gustiness=0.0,
         )
 
+    note_count = len(notes)
     # Trim leading/trailing silence to avoid skewing density
     start_time = notes[0].time
     end_time = notes[-1].time
@@ -96,11 +97,11 @@ def compute_density(
     terminal_gustiness = 0.0
     start_bin = len(per_second_total)
     terminal_window_used: float | None = None
-    if total_value and len(notes) > 0:
-        gauge_rate = total_value / len(notes)
+    if total_value and note_count > 0:
+        gauge_rate = total_value / note_count
         if gauge_rate > 0:
             required_notes = ceil((85.0 - 2.0) / gauge_rate)
-            start_idx = max(len(notes) - required_notes, 0)
+            start_idx = max(note_count - required_notes, 0)
             terminal_notes = notes[start_idx:]
             terminal_start = terminal_notes[0].time if terminal_notes else end_time
             window = max(end_time - terminal_start, 0.0)
@@ -144,7 +145,7 @@ def compute_density(
         diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
         if diffs:
             mean_diff = sum(diffs) / len(diffs)
-            density_change = mean_diff / (chm_density + epsilon)
+            density_change = mean_diff / (note_count + epsilon)
     if per_second_total:
         threshold = floor(chm_density)
         occupied_bins = sum(1 for val in per_second_total if val >= threshold)
