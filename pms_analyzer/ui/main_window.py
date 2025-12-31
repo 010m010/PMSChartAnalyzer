@@ -1709,9 +1709,7 @@ class DifficultyTab(QWidget):
             stats = _quantiles(values)
             labels = [stats["mean"], stats["min"], stats["q1"], stats["median"], stats["q3"], stats["max"]]
             for col, val in enumerate(labels, start=2):
-                if metric == "最大秒間密度":
-                    text = "-" if val is None else f"{val:.0f}"
-                elif metric == "高密度占有率":
+                if metric == "高密度占有率":
                     text = "-" if val is None else f"{val:.2f} %"
                 else:
                     text = "-" if val is None else f"{val:.2f}"
