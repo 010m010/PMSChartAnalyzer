@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QMenu,
+    QHeaderView,
 )
 import requests
 
@@ -471,13 +472,27 @@ class SingleAnalysisTab(QWidget):
         dialog.setWindowTitle("履歴")
         dialog_layout = QVBoxLayout(dialog)
 
-        list_widget = QListWidget(dialog)
-        list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        list_widget.setTextElideMode(Qt.TextElideMode.ElideMiddle)
-        list_widget.setMinimumWidth(400)
-        list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table_widget = QTableWidget(dialog)
+        table_widget.setColumnCount(4)
+        table_widget.setHorizontalHeaderLabels(["No", "LEVEL", "曲名", "Path"])
+        table_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table_widget.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table_widget.setMinimumWidth(360)
+        table_widget.setAlternatingRowColors(True)
+        table_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        header = table_widget.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setDefaultSectionSize(120)
+        header.resizeSection(0, 50)
+        header.resizeSection(1, 70)
+        header.resizeSection(2, 140)
+        header.resizeSection(3, 160)
+        table_widget.verticalHeader().setVisible(False)
 
         recent_records = list(reversed(history[-100:]))
+        row = 0
         for item in recent_records:
             if not isinstance(item, dict):
                 continue
@@ -485,18 +500,34 @@ class SingleAnalysisTab(QWidget):
             if not isinstance(file_path, str):
                 continue
             title = item.get("title") if isinstance(item.get("title"), str) else None
-            display_text = title or Path(file_path).name
-            list_item = QListWidgetItem(display_text)
-            list_item.setData(Qt.ItemDataRole.UserRole, file_path)
-            list_item.setToolTip(file_path)
-            list_widget.addItem(list_item)
+            level = item.get("level") if isinstance(item.get("level"), str) else None
+            if not level:
+                level = item.get("difficulty") if isinstance(item.get("difficulty"), str) else None
+            tooltip = file_path
+            table_widget.insertRow(row)
+            number_item = QTableWidgetItem(str(row + 1))
+            number_item.setData(Qt.ItemDataRole.UserRole, file_path)
+            level_item = QTableWidgetItem(level or "-")
+            title_item = QTableWidgetItem(title or Path(file_path).name)
+            path_item = QTableWidgetItem(file_path)
+            for table_item in (number_item, level_item, title_item, path_item):
+                table_item.setToolTip(tooltip)
+            table_widget.setItem(row, 0, number_item)
+            table_widget.setItem(row, 1, level_item)
+            table_widget.setItem(row, 2, title_item)
+            table_widget.setItem(row, 3, path_item)
+            row += 1
 
-        if list_widget.count() == 0:
+        if table_widget.rowCount() == 0:
             QMessageBox.information(self, "履歴", "表示できる履歴がありません")
             return
 
-        def _on_item_clicked(item: QListWidgetItem) -> None:
-            path_str = item.data(Qt.ItemDataRole.UserRole)
+        def _on_row_activated(row_index: int, column_index: int) -> None:
+            del column_index
+            path_item = table_widget.item(row_index, 0)
+            if not path_item:
+                return
+            path_str = path_item.data(Qt.ItemDataRole.UserRole)
             if not path_str:
                 return
             path = Path(str(path_str))
@@ -506,11 +537,12 @@ class SingleAnalysisTab(QWidget):
             dialog.accept()
             self.load_file(path)
 
-        list_widget.itemClicked.connect(_on_item_clicked)
+        table_widget.cellDoubleClicked.connect(_on_row_activated)
+        table_widget.itemActivated.connect(lambda item: _on_row_activated(item.row(), item.column()))
 
-        dialog_layout.addWidget(list_widget)
+        dialog_layout.addWidget(table_widget)
         dialog.setLayout(dialog_layout)
-        dialog.resize(480, 520)
+        dialog.resize(420, 520)
         dialog.exec()
 
     def load_file(self, path: Path) -> None:
@@ -554,6 +586,7 @@ class SingleAnalysisTab(QWidget):
                 "terminal_difficulty_chm": density.terminal_difficulty_chm,
                 "terminal_density_difference": density.terminal_density_difference,
             },
+            level=parse_result.level,
         )
         append_history(record)
         if self._single_result_callback:
