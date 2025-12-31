@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, floor
 from typing import Dict, Iterable, List, Sequence
 
 from .pms_parser import Note
@@ -15,6 +15,7 @@ class DensityResult:
     average_density: float
     cms_density: float
     chm_density: float
+    high_density_occupancy_rate: float
     terminal_density: float
     terminal_rms_density: float
     terminal_cms_density: float
@@ -50,6 +51,7 @@ def compute_density(
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            high_density_occupancy_rate=0.0,
             terminal_density=0.0,
             terminal_rms_density=0.0,
             terminal_cms_density=0.0,
@@ -135,6 +137,12 @@ def compute_density(
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    if per_second_total:
+        threshold = floor(chm_density)
+        occupied_bins = sum(1 for val in per_second_total if val >= threshold)
+        high_density_occupancy_rate = (occupied_bins / len(per_second_total)) * 100
+    else:
+        high_density_occupancy_rate = 0.0
 
     mean_per_second = sum(non_zero_bins) / len(non_zero_bins) if non_zero_bins else 0.0
     variance = (
@@ -185,6 +193,7 @@ def compute_density(
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
         terminal_rms_density=terminal_rms_density,
         terminal_cms_density=terminal_cms_density,
@@ -210,6 +219,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "average_density": 0.0,
             "cms_density": 0.0,
             "chm_density": 0.0,
+            "high_density_occupancy_rate": 0.0,
             "terminal_density": 0.0,
             "terminal_rms_density": 0.0,
             "terminal_cms_density": 0.0,
@@ -229,6 +239,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "average_density": sum(r.average_density for r in totals) / len(totals),
         "cms_density": sum(r.cms_density for r in totals) / len(totals),
         "chm_density": sum(r.chm_density for r in totals) / len(totals),
+        "high_density_occupancy_rate": sum(r.high_density_occupancy_rate for r in totals) / len(totals),
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
         "terminal_rms_density": sum(r.terminal_rms_density for r in totals) / len(totals),
         "terminal_cms_density": sum(r.terminal_cms_density for r in totals) / len(totals),
