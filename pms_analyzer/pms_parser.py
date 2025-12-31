@@ -78,6 +78,7 @@ class PMSParser:
         text = self._read_file(path)
         bpm = self.default_bpm
         bpm_defs: Dict[str, float] = {}
+        stop_defs: Dict[str, int] = {}
         measure_lengths: Dict[int, float] = {}
         measures: Dict[int, List[Tuple[int, str]]] = {}
         title = path.stem
@@ -133,6 +134,12 @@ class PMSParser:
                         bpm_defs[code.upper()] = float(value)
                     except ValueError:
                         pass
+                elif tag.startswith("STOP") and len(tag) == 6:
+                    code = tag[4:]
+                    try:
+                        stop_defs[code.upper()] = int(value)
+                    except ValueError:
+                        pass
                 elif tag == "TITLE" and value:
                     title = value
                 elif tag == "ARTIST" and value:
@@ -164,7 +171,7 @@ class PMSParser:
                             pass
                 continue
 
-        notes, total_time, bpm_stats = self._convert_to_notes(measures, bpm, bpm_defs, measure_lengths)
+        notes, total_time, bpm_stats = self._convert_to_notes(measures, bpm, bpm_defs, stop_defs, measure_lengths)
         start_bpm, min_bpm, max_bpm = bpm_stats
 
         return ParseResult(
@@ -329,6 +336,7 @@ class PMSParser:
         measures: Dict[int, List[Tuple[int, str]]],
         base_bpm: float,
         bpm_defs: Dict[str, float],
+        stop_defs: Dict[str, int],
         measure_lengths: Dict[int, float],
     ) -> tuple[List[Note], float, tuple[float, float, float]]:
         current_time = 0.0
@@ -344,9 +352,9 @@ class PMSParser:
                 gap_length = measure_lengths.get(missing, 1.0)
                 current_time += self._position_to_seconds(1.0, current_bpm, gap_length)
 
-            events = self._expand_measure_events(measures[measure], bpm_defs)
+            events = self._expand_measure_events(measures[measure], bpm_defs, stop_defs)
             measure_length = measure_lengths.get(measure, 1.0)
-            events.sort(key=lambda item: (item[0], 0 if item[1] == "bpm" else 1))
+            events.sort(key=lambda item: (item[0], self._event_priority(item[1])))
 
             previous_position = 0.0
             for position, kind, value in events:
@@ -360,6 +368,8 @@ class PMSParser:
                     max_bpm = max(max_bpm, current_bpm)
                 elif kind == "note":
                     notes.append(Note(time=current_time, key_index=value))
+                elif kind == "stop":
+                    current_time += self._stop_value_to_seconds(value, current_bpm)
 
             current_time += self._position_to_seconds(1.0 - previous_position, current_bpm, measure_length)
             previous_measure = measure
@@ -373,7 +383,7 @@ class PMSParser:
         return unique_notes, current_time, (base_bpm, min_bpm, max_bpm)
 
     def _expand_measure_events(
-        self, measure_data: Iterable[Tuple[int, str]], bpm_defs: Dict[str, float]
+        self, measure_data: Iterable[Tuple[int, str]], bpm_defs: Dict[str, float], stop_defs: Dict[str, int]
     ) -> List[Tuple[float, str, float | int]]:
         events: List[Tuple[float, str, float | int]] = []
         for channel, data in measure_data:
@@ -400,7 +410,26 @@ class PMSParser:
                         events.append((position, "bpm", float(bpm_value)))
                     except ValueError:
                         continue
+                elif channel == 9:
+                    stop_value = stop_defs.get(code.upper())
+                    if stop_value is not None:
+                        events.append((position, "stop", stop_value))
         return events
+
+    def _event_priority(self, kind: str) -> int:
+        if kind == "bpm":
+            return 0
+        if kind == "stop":
+            return 1
+        return 2
+
+    def _stop_value_to_seconds(self, stop_value: int, bpm: float) -> float:
+        if bpm <= 0:
+            return 0.0
+        beats_per_measure_unit = 4.0
+        unit_fraction = 1.0 / 192.0
+        seconds_per_beat = 60.0 / bpm
+        return stop_value * unit_fraction * beats_per_measure_unit * seconds_per_beat
 
     def _position_to_seconds(self, portion: float, bpm: float, measure_length: float) -> float:
         if bpm <= 0:
