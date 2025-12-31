@@ -101,6 +101,7 @@ def analyze_table(
                 average_density=0.0,
                 cms_density=0.0,
                 chm_density=0.0,
+                high_density_occupancy_rate=0.0,
                 terminal_density=0.0,
                 terminal_rms_density=0.0,
                 terminal_cms_density=0.0,

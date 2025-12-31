@@ -32,6 +32,7 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
         average_density=1.5,
         cms_density=1.5,
         chm_density=1.5,
+        high_density_occupancy_rate=50.0,
         terminal_density=0.5,
         terminal_rms_density=0.5,
         terminal_cms_density=0.5,
@@ -75,4 +76,5 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
     assert cached.analyses
     loaded_analysis = cached.analyses[0]
     assert loaded_analysis.density.per_second_total == density.per_second_total
+    assert loaded_analysis.density.high_density_occupancy_rate == density.high_density_occupancy_rate
     assert loaded_analysis.resolved_path == entry.chart_path
