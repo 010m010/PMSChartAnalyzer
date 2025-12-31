@@ -21,6 +21,7 @@ class AnalysisRecord:
     artist: str
     difficulty: Optional[str]
     metrics: Dict[str, float]
+    level: Optional[str] = None
 
 
 def ensure_config_dir() -> None:
