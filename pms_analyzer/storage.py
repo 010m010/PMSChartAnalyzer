@@ -292,7 +292,8 @@ def _recompute_density_metrics(
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
     density_change = 0.0
     if per_second_total:
-        diffs = [abs(per_second_total[i] - per_second_total[i - 1]) for i in range(1, len(per_second_total))]
+        change_series = [0] + per_second_total + [0]
+        diffs = [abs(change_series[i] - change_series[i - 1]) for i in range(1, len(change_series))]
         if diffs:
             total_diff = sum(diffs)
             density_change = total_diff / (total_notes + epsilon)
