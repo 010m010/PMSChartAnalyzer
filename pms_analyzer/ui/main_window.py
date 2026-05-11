@@ -865,6 +865,8 @@ class DifficultyTab(QWidget):
         self.metric_selector.addItems(
             [
                 "NOTES数",
+                "TOTAL値",
+                "増加率",
                 "最大秒間密度",
                 "平均密度",
                 "体感密度",
@@ -898,6 +900,14 @@ class DifficultyTab(QWidget):
         self.scale_min_input.setPlaceholderText("縦軸の最小値")
         self.scale_max_input = QLineEdit()
         self.scale_max_input.setPlaceholderText("縦軸の最大値")
+        self.x_scale_min_input = QLineEdit()
+        self.x_scale_min_input.setPlaceholderText("横軸の最小値")
+        self.x_scale_max_input = QLineEdit()
+        self.x_scale_max_input.setPlaceholderText("横軸の最大値")
+        self.scale_y_label = QLabel("縦軸:")
+        self.scale_x_label = QLabel("横軸:")
+        self.scale_y_separator = QLabel("～")
+        self.scale_x_separator = QLabel("～")
         self.scale_button = QPushButton("更新")
         self.scale_reset_button = QPushButton("リセット")
         self.show_unresolved_checkbox = QCheckBox("未解析を表示")
@@ -906,6 +916,8 @@ class DifficultyTab(QWidget):
         self._saved_show_total_undefined = False
         self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
+        self._manual_x_min: float | None = None
+        self._manual_x_max: float | None = None
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(
             [
@@ -1015,19 +1027,27 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.chart_type_selector)
         metric_layout.addWidget(self.metric_label)
         metric_layout.addWidget(self.metric_selector)
-        metric_layout.addWidget(QLabel("スケール調整:"))
-        metric_layout.addWidget(self.scale_min_input)
-        metric_layout.addWidget(QLabel("～"))
-        metric_layout.addWidget(self.scale_max_input)
-        metric_layout.addWidget(self.scale_button)
-        metric_layout.addWidget(self.scale_reset_button)
+        metric_layout.addWidget(self.correlation_x_label)
+        metric_layout.addWidget(self.correlation_x_selector)
+
+        scale_layout = QHBoxLayout()
+        scale_layout.addStretch()
+        scale_layout.addWidget(QLabel("スケール調整:"))
+        scale_layout.addWidget(self.scale_y_label)
+        scale_layout.addWidget(self.scale_min_input)
+        scale_layout.addWidget(self.scale_y_separator)
+        scale_layout.addWidget(self.scale_max_input)
+        scale_layout.addWidget(self.scale_x_label)
+        scale_layout.addWidget(self.x_scale_min_input)
+        scale_layout.addWidget(self.scale_x_separator)
+        scale_layout.addWidget(self.x_scale_max_input)
+        scale_layout.addWidget(self.scale_button)
+        scale_layout.addWidget(self.scale_reset_button)
 
         self.correlation_options_widget = QWidget()
         correlation_options_layout = QHBoxLayout()
         correlation_options_layout.setContentsMargins(0, 0, 0, 0)
         correlation_options_layout.addStretch()
-        correlation_options_layout.addWidget(self.correlation_x_label)
-        correlation_options_layout.addWidget(self.correlation_x_selector)
         correlation_options_layout.addWidget(self.correlation_color_checkbox)
         correlation_options_layout.addWidget(self.correlation_regression_checkbox)
         correlation_options_layout.addWidget(self.correlation_stats_label)
@@ -1037,6 +1057,7 @@ class DifficultyTab(QWidget):
         chart_area_layout = QVBoxLayout()
         chart_area_layout.setContentsMargins(0, 0, 0, 0)
         chart_area_layout.addLayout(metric_layout)
+        chart_area_layout.addLayout(scale_layout)
         chart_area_layout.addWidget(self.correlation_options_widget)
         chart_area_layout.addWidget(self.difficulty_chart)
         chart_area_layout.addWidget(self.box_chart)
@@ -1137,8 +1158,18 @@ class DifficultyTab(QWidget):
 
     def _update_chart_mode_controls(self) -> None:
         is_correlation = self._is_correlation_chart_selected()
-        self.correlation_options_widget.setVisible(is_correlation)
-        self.single_overlay_checkbox.setVisible(not is_correlation)
+        horizontal_widgets = (
+            self.correlation_x_label,
+            self.correlation_x_selector,
+            self.scale_x_label,
+            self.x_scale_min_input,
+            self.scale_x_separator,
+            self.x_scale_max_input,
+        )
+        for widget in horizontal_widgets:
+            widget.setEnabled(is_correlation)
+        self.correlation_options_widget.setEnabled(is_correlation)
+        self.single_overlay_checkbox.setEnabled(not is_correlation)
         if not is_correlation:
             self.correlation_stats_label.clear()
 
@@ -1346,8 +1377,12 @@ class DifficultyTab(QWidget):
         if clear_scale:
             self._manual_y_min = None
             self._manual_y_max = None
+            self._manual_x_min = None
+            self._manual_x_max = None
             self.scale_min_input.clear()
             self.scale_max_input.clear()
+            self.x_scale_min_input.clear()
+            self.x_scale_max_input.clear()
         if not self._latest_analyses:
             return
         self._render_chart()
@@ -1520,6 +1555,7 @@ class DifficultyTab(QWidget):
             f"n={len(points)} / Pearson r={_format_correlation(pearson)} / Spearman rho={_format_correlation(spearman)}"
         )
         level_order = sorted({point[2] for point in points}, key=difficulty_sort_key)
+        x_limits = self._determine_x_limits(xs)
         y_limits = self._determine_y_limits(ys)
 
         self.box_chart.hide()
@@ -1532,6 +1568,7 @@ class DifficultyTab(QWidget):
             level_order=level_order,
             color_by_level=self.correlation_color_checkbox.isChecked(),
             show_regression=self.correlation_regression_checkbox.isChecked(),
+            x_limits=x_limits,
             y_limits=y_limits,
         )
 
@@ -1594,6 +1631,8 @@ class DifficultyTab(QWidget):
         terminal_available = analysis.total_value is not None
         if metric == "NOTES数":
             return float(analysis.note_count or 0)
+        if metric == "TOTAL値":
+            return analysis.total_value
         if metric == "最大秒間密度":
             return density.max_density
         if metric == "平均密度":
@@ -1631,6 +1670,8 @@ class DifficultyTab(QWidget):
         terminal_available = self._single_overlay_total_value is not None
         if metric == "NOTES数":
             return float(self._single_overlay_note_count or 0)
+        if metric == "TOTAL値":
+            return self._single_overlay_total_value
         if metric == "最大秒間密度":
             return density.max_density
         if metric == "平均密度":
@@ -1706,6 +1747,20 @@ class DifficultyTab(QWidget):
             upper = lower + 1.0
         return (lower, upper)
 
+    def _determine_x_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
+        if self._manual_x_min is None and self._manual_x_max is None:
+            return None
+        auto_limits = self._compute_y_limits(values) if values else None
+        lower = self._manual_x_min if self._manual_x_min is not None else (auto_limits[0] if auto_limits else 0.0)
+        upper = self._manual_x_max if self._manual_x_max is not None else (
+            auto_limits[1] if auto_limits else (lower + 1.0)
+        )
+        if values and all(val >= 0 for val in values) and lower < 0:
+            lower = 0.0
+        if lower == upper:
+            upper = lower + 1.0
+        return (lower, upper)
+
     def _render_summary(self) -> None:
         metric = self.summary_metric_selector.currentText()
         rows = {}
@@ -1746,30 +1801,47 @@ class DifficultyTab(QWidget):
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
     def _apply_manual_scale(self) -> None:
-        min_text = self.scale_min_input.text().strip()
-        max_text = self.scale_max_input.text().strip()
-        if not min_text and not max_text:
+        y_min_text = self.scale_min_input.text().strip()
+        y_max_text = self.scale_max_input.text().strip()
+        x_min_text = self.x_scale_min_input.text().strip()
+        x_max_text = self.x_scale_max_input.text().strip()
+        use_x_scale = self._is_correlation_chart_selected()
+        if not y_min_text and not y_max_text and (not use_x_scale or (not x_min_text and not x_max_text)):
             self._manual_y_min = None
             self._manual_y_max = None
+            if use_x_scale:
+                self._manual_x_min = None
+                self._manual_x_max = None
             self._refresh_chart_only()
             return
         try:
-            min_value = float(min_text) if min_text else None
-            max_value = float(max_text) if max_text else None
-            if min_value is not None and max_value is not None and min_value >= max_value:
+            y_min_value = float(y_min_text) if y_min_text else None
+            y_max_value = float(y_max_text) if y_max_text else None
+            if y_min_value is not None and y_max_value is not None and y_min_value >= y_max_value:
                 raise ValueError
-            self._manual_y_min = min_value
-            self._manual_y_max = max_value
+            self._manual_y_min = y_min_value
+            self._manual_y_max = y_max_value
+            if use_x_scale:
+                x_min_value = float(x_min_text) if x_min_text else None
+                x_max_value = float(x_max_text) if x_max_text else None
+                if x_min_value is not None and x_max_value is not None and x_min_value >= x_max_value:
+                    raise ValueError
+                self._manual_x_min = x_min_value
+                self._manual_x_max = x_max_value
         except ValueError:
-            QMessageBox.warning(self, "不正な値", "数値を正しく入力し、最小値は最大値より小さくしてください")
+            QMessageBox.warning(self, "不正な値", "縦軸/横軸の数値を正しく入力し、最小値は最大値より小さくしてください")
             return
         self._refresh_chart_only()
 
     def _reset_manual_scale(self) -> None:
         self.scale_min_input.clear()
         self.scale_max_input.clear()
+        self.x_scale_min_input.clear()
+        self.x_scale_max_input.clear()
         self._manual_y_min = None
         self._manual_y_max = None
+        self._manual_x_min = None
+        self._manual_x_max = None
         self._refresh_chart_only()
 
     def _apply_preferred_column_widths(self) -> None:

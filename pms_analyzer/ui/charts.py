@@ -710,6 +710,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         level_order: Optional[List[str]] = None,
         color_by_level: bool = True,
         show_regression: bool = True,
+        x_limits: Optional[tuple[float, float]] = None,
         y_limits: Optional[tuple[float, float]] = None,
     ) -> None:
         self._last_plot_state = {
@@ -719,6 +720,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             "level_order": level_order,
             "color_by_level": color_by_level,
             "show_regression": show_regression,
+            "x_limits": x_limits,
             "y_limits": y_limits,
         }
         self.ax.clear()
@@ -757,6 +759,8 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             line_x = np.array([x_min, x_max], dtype=float)
             line_y = slope * line_x + intercept
             self.ax.plot(line_x, line_y, color="#F0B35A" if dark else "#B85C00", linewidth=1.4)
+        if x_limits:
+            self.ax.set_xlim(*x_limits)
         if y_limits:
             self.ax.set_ylim(*y_limits)
         self.figure.tight_layout()
@@ -773,6 +777,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             level_order=self._last_plot_state["level_order"],
             color_by_level=self._last_plot_state["color_by_level"],
             show_regression=self._last_plot_state["show_regression"],
+            x_limits=self._last_plot_state["x_limits"],
             y_limits=self._last_plot_state["y_limits"],
         )
 
