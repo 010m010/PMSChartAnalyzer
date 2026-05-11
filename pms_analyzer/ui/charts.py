@@ -655,4 +655,137 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self._schedule_resize_redraw()
 
 
-__all__ = ["StackedDensityChart", "BoxPlotCanvas", "DifficultyScatterChart"]
+class CorrelationScatterChart(FigureCanvasQTAgg):
+    def __init__(self, parent=None):  # type: ignore[override]
+        self.figure = Figure(figsize=(7, 3))
+        self.ax = self.figure.add_subplot(111)
+        super().__init__(self.figure)
+        self.setParent(parent)
+        self.theme_mode: ThemeMode = "system"
+        self._style_axes(dark=self._is_dark_mode())
+        self._last_plot_state: dict[str, object] | None = None
+        self._resize_debounce_timer = QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.timeout.connect(self._handle_resize_redraw)
+
+    def _is_dark_mode(self) -> bool:
+        if self.theme_mode == "dark":
+            return True
+        if self.theme_mode == "light":
+            return False
+        if QGuiApplication.instance():
+            return system_prefers_dark()
+        palette = self.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        return window_color.lightness() < 128
+
+    def set_theme_mode(self, mode: ThemeMode) -> None:
+        self.theme_mode = mode
+        self._style_axes(dark=self._is_dark_mode())
+        self._redraw_last_plot()
+
+    def _style_axes(self, x_label: str = "X", y_label: str = "Y", *, dark: bool) -> None:
+        face = "#1f1f1f" if dark else "#f2f4f8"
+        text = "#e6e6e6" if dark else "#1D2835"
+        grid = "#555555" if dark else "#b8c5d3"
+        border = "#9fb4c9" if dark else "#556075"
+        self.figure.set_facecolor(face)
+        self.ax.set_facecolor(face)
+        self.ax.tick_params(axis="x", colors=text)
+        self.ax.tick_params(axis="y", colors=text)
+        for spine in self.ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color(border)
+            spine.set_linewidth(1.0)
+        self.ax.set_xlabel(x_label, color=text)
+        self.ax.set_ylabel(y_label, color=text)
+        self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
+
+    def plot(
+        self,
+        points: List[tuple[float, float, str]],
+        *,
+        x_label: str,
+        y_label: str,
+        level_order: Optional[List[str]] = None,
+        color_by_level: bool = True,
+        show_regression: bool = True,
+        y_limits: Optional[tuple[float, float]] = None,
+    ) -> None:
+        self._last_plot_state = {
+            "points": points,
+            "x_label": x_label,
+            "y_label": y_label,
+            "level_order": level_order,
+            "color_by_level": color_by_level,
+            "show_regression": show_regression,
+            "y_limits": y_limits,
+        }
+        self.ax.clear()
+        dark = self._is_dark_mode()
+        self._style_axes(x_label=x_label, y_label=y_label, dark=dark)
+        if not points:
+            self.draw()
+            return
+
+        marker_color = "#7CC7FF" if dark else "#2F7ACC"
+        if color_by_level:
+            ordered_levels = level_order or sorted({level for _, _, level in points})
+            color_map = cm.get_cmap("tab20", max(len(ordered_levels), 1))
+            for idx, level in enumerate(ordered_levels):
+                grouped = [(x, y) for x, y, point_level in points if point_level == level]
+                if not grouped:
+                    continue
+                xs = [x for x, _ in grouped]
+                ys = [y for _, y in grouped]
+                self.ax.scatter(xs, ys, color=color_map(idx), alpha=0.82, label=level)
+            if len(ordered_levels) <= 12:
+                legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="best")
+                for text in legend.get_texts():
+                    text.set_color("#E6E6E6" if dark else "#1D2835")
+        else:
+            xs = [x for x, _, _ in points]
+            ys = [y for _, y, _ in points]
+            self.ax.scatter(xs, ys, c=marker_color, alpha=0.82)
+
+        xs = np.array([x for x, _, _ in points], dtype=float)
+        ys = np.array([y for _, y, _ in points], dtype=float)
+        if show_regression and len(points) >= 2 and float(np.ptp(xs)) > 0:
+            slope, intercept = np.polyfit(xs, ys, 1)
+            x_min = float(xs.min())
+            x_max = float(xs.max())
+            line_x = np.array([x_min, x_max], dtype=float)
+            line_y = slope * line_x + intercept
+            self.ax.plot(line_x, line_y, color="#F0B35A" if dark else "#B85C00", linewidth=1.4)
+        if y_limits:
+            self.ax.set_ylim(*y_limits)
+        self.figure.tight_layout()
+        self.draw()
+
+    def _redraw_last_plot(self) -> None:
+        if not self._last_plot_state:
+            self.draw_idle()
+            return
+        self.plot(
+            self._last_plot_state["points"],
+            x_label=self._last_plot_state["x_label"],
+            y_label=self._last_plot_state["y_label"],
+            level_order=self._last_plot_state["level_order"],
+            color_by_level=self._last_plot_state["color_by_level"],
+            show_regression=self._last_plot_state["show_regression"],
+            y_limits=self._last_plot_state["y_limits"],
+        )
+
+    def _handle_resize_redraw(self) -> None:
+        self.figure.tight_layout()
+        self._redraw_last_plot()
+
+    def _schedule_resize_redraw(self) -> None:
+        self._resize_debounce_timer.start(180)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._schedule_resize_redraw()
+
+
+__all__ = ["StackedDensityChart", "BoxPlotCanvas", "DifficultyScatterChart", "CorrelationScatterChart"]

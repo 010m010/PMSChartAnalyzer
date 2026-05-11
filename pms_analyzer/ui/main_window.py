@@ -73,7 +73,7 @@ from ..storage import (
     save_cached_difficulty_table,
     update_saved_table_name,
 )
-from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
+from .charts import BoxPlotCanvas, CorrelationScatterChart, DifficultyScatterChart, StackedDensityChart
 from .playground_dialog import PlaygroundDialog
 from PyQt6.sip import isdeleted
 
@@ -104,6 +104,45 @@ def _quantiles(values: List[float]) -> Dict[str, float | None]:
         "max": sorted_vals[-1],
         "mean": mean(sorted_vals),
     }
+
+
+def _pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    mean_x = mean(xs)
+    mean_y = mean(ys)
+    numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    denom_x = sum((x - mean_x) ** 2 for x in xs)
+    denom_y = sum((y - mean_y) ** 2 for y in ys)
+    denominator = (denom_x * denom_y) ** 0.5
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _rank_values(values: list[float]) -> list[float]:
+    indexed = sorted(enumerate(values), key=lambda item: item[1])
+    ranks = [0.0] * len(values)
+    idx = 0
+    while idx < len(indexed):
+        end = idx + 1
+        while end < len(indexed) and indexed[end][1] == indexed[idx][1]:
+            end += 1
+        rank = (idx + 1 + end) / 2.0
+        for original_idx, _ in indexed[idx:end]:
+            ranks[original_idx] = rank
+        idx = end
+    return ranks
+
+
+def _spearman_correlation(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    return _pearson_correlation(_rank_values(xs), _rank_values(ys))
+
+
+def _format_correlation(value: float | None) -> str:
+    return "-" if value is None else f"{value:.3f}"
 
 
 @dataclass
@@ -780,6 +819,8 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
+        self.correlation_chart = CorrelationScatterChart(self)
+        self.correlation_chart.hide()
         self._table_headers = [
             "LEVEL",
             "曲名",
@@ -835,8 +876,24 @@ class DifficultyTab(QWidget):
                 "終端密度差",
             ]
         )
+        self.correlation_x_selector = QComboBox()
+        self.correlation_x_selector.addItems(
+            [self.metric_selector.itemText(idx) for idx in range(self.metric_selector.count())]
+        )
+        default_x_index = self.correlation_x_selector.findText("平均密度")
+        if default_x_index >= 0:
+            self.correlation_x_selector.setCurrentIndex(default_x_index)
         self.chart_type_selector = QComboBox()
-        self.chart_type_selector.addItems(["箱ひげ図", "散布図"])
+        self.chart_type_selector.addItems(["箱ひげ図", "散布図", "相関散布図"])
+        self.graph_label = QLabel("グラフ:")
+        self.metric_label = QLabel("縦軸:")
+        self.correlation_x_label = QLabel("横軸:")
+        self.correlation_color_checkbox = QCheckBox("LEVEL 色分け")
+        self.correlation_color_checkbox.setChecked(True)
+        self.correlation_regression_checkbox = QCheckBox("回帰線")
+        self.correlation_regression_checkbox.setChecked(True)
+        self.correlation_stats_label = QLabel("")
+        self.correlation_stats_label.setStyleSheet("font-weight: bold;")
         self.scale_min_input = QLineEdit()
         self.scale_min_input.setPlaceholderText("縦軸の最小値")
         self.scale_max_input = QLineEdit()
@@ -954,10 +1011,10 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.filter_button)
         metric_layout.addWidget(self.filter_status_label)
         metric_layout.addStretch()
-        metric_layout.addWidget(QLabel("縦軸:"))
-        metric_layout.addWidget(self.metric_selector)
-        metric_layout.addWidget(QLabel("グラフ:"))
+        metric_layout.addWidget(self.graph_label)
         metric_layout.addWidget(self.chart_type_selector)
+        metric_layout.addWidget(self.metric_label)
+        metric_layout.addWidget(self.metric_selector)
         metric_layout.addWidget(QLabel("スケール調整:"))
         metric_layout.addWidget(self.scale_min_input)
         metric_layout.addWidget(QLabel("～"))
@@ -965,12 +1022,25 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.scale_button)
         metric_layout.addWidget(self.scale_reset_button)
 
+        self.correlation_options_widget = QWidget()
+        correlation_options_layout = QHBoxLayout()
+        correlation_options_layout.setContentsMargins(0, 0, 0, 0)
+        correlation_options_layout.addStretch()
+        correlation_options_layout.addWidget(self.correlation_x_label)
+        correlation_options_layout.addWidget(self.correlation_x_selector)
+        correlation_options_layout.addWidget(self.correlation_color_checkbox)
+        correlation_options_layout.addWidget(self.correlation_regression_checkbox)
+        correlation_options_layout.addWidget(self.correlation_stats_label)
+        self.correlation_options_widget.setLayout(correlation_options_layout)
+
         chart_area = QWidget()
         chart_area_layout = QVBoxLayout()
         chart_area_layout.setContentsMargins(0, 0, 0, 0)
         chart_area_layout.addLayout(metric_layout)
+        chart_area_layout.addWidget(self.correlation_options_widget)
         chart_area_layout.addWidget(self.difficulty_chart)
         chart_area_layout.addWidget(self.box_chart)
+        chart_area_layout.addWidget(self.correlation_chart)
         overlay_toggle_layout = QHBoxLayout()
         overlay_toggle_layout.addStretch()
         overlay_toggle_layout.addWidget(self.single_overlay_checkbox)
@@ -1030,7 +1100,8 @@ class DifficultyTab(QWidget):
         self.analyze_button.clicked.connect(self._analyze_table)
         self.url_list.currentIndexChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
-        self.chart_type_selector.currentTextChanged.connect(lambda: self._refresh_chart_only(clear_scale=True))
+        self.correlation_x_selector.currentTextChanged.connect(lambda _text: self._refresh_chart_only())
+        self.chart_type_selector.currentTextChanged.connect(self._on_chart_type_changed)
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
         self.scale_button.clicked.connect(self._apply_manual_scale)
         self.scale_reset_button.clicked.connect(self._reset_manual_scale)
@@ -1038,11 +1109,14 @@ class DifficultyTab(QWidget):
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
         self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
+        self.correlation_color_checkbox.toggled.connect(lambda: self._refresh_chart_only())
+        self.correlation_regression_checkbox.toggled.connect(lambda: self._refresh_chart_only())
         self.show_unresolved_checkbox.toggled.connect(self._on_visibility_option_changed)
         self.show_total_undefined_checkbox.toggled.connect(self._on_visibility_option_changed)
         self.column_visibility_button.clicked.connect(self._open_column_visibility_dialog)
         self.export_table_button.clicked.connect(self._export_table_csv)
         self.export_summary_button.clicked.connect(self._export_summary_csv)
+        self._update_chart_mode_controls()
         self._apply_column_visibility()
         self._load_filter_state()
         self._refresh_saved_urls()
@@ -1051,7 +1125,22 @@ class DifficultyTab(QWidget):
     def set_theme_mode(self, mode: str) -> None:
         self.difficulty_chart.set_theme_mode(mode)
         self.box_chart.set_theme_mode(mode)
+        self.correlation_chart.set_theme_mode(mode)
         self._render_chart()
+
+    def _on_chart_type_changed(self, _text: str = "") -> None:
+        self._update_chart_mode_controls()
+        self._refresh_chart_only(clear_scale=True)
+
+    def _is_correlation_chart_selected(self) -> bool:
+        return self.chart_type_selector.currentText() == "相関散布図"
+
+    def _update_chart_mode_controls(self) -> None:
+        is_correlation = self._is_correlation_chart_selected()
+        self.correlation_options_widget.setVisible(is_correlation)
+        self.single_overlay_checkbox.setVisible(not is_correlation)
+        if not is_correlation:
+            self.correlation_stats_label.clear()
 
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
@@ -1408,7 +1497,51 @@ class DifficultyTab(QWidget):
             return f"{symbol}{value}"
         return value
 
+    def _render_correlation_chart(self) -> None:
+        x_metric = self.correlation_x_selector.currentText()
+        y_metric = self.metric_selector.currentText()
+        points: list[tuple[float, float, str]] = []
+        for analysis in self._latest_analyses:
+            if not self._is_chart_visible(analysis):
+                continue
+            if not analysis.resolved_path or not analysis.density.per_second_total:
+                continue
+            x_value = self._metric_value(analysis, x_metric)
+            y_value = self._metric_value(analysis, y_metric)
+            if x_value is None or y_value is None:
+                continue
+            points.append((x_value, y_value, self._format_difficulty(analysis.difficulty)))
+
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        pearson = _pearson_correlation(xs, ys)
+        spearman = _spearman_correlation(xs, ys)
+        self.correlation_stats_label.setText(
+            f"n={len(points)} / Pearson r={_format_correlation(pearson)} / Spearman rho={_format_correlation(spearman)}"
+        )
+        level_order = sorted({point[2] for point in points}, key=difficulty_sort_key)
+        y_limits = self._determine_y_limits(ys)
+
+        self.box_chart.hide()
+        self.difficulty_chart.hide()
+        self.correlation_chart.show()
+        self.correlation_chart.plot(
+            points,
+            x_label=x_metric,
+            y_label=y_metric,
+            level_order=level_order,
+            color_by_level=self.correlation_color_checkbox.isChecked(),
+            show_regression=self.correlation_regression_checkbox.isChecked(),
+            y_limits=y_limits,
+        )
+
     def _render_chart(self) -> None:
+        self._update_chart_mode_controls()
+        if self._is_correlation_chart_selected():
+            self._render_correlation_chart()
+            return
+
+        self.correlation_chart.hide()
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
         for analysis in self._latest_analyses:
