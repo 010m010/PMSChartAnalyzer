@@ -12,6 +12,7 @@ from urllib3.util import Retry
 
 import sqlite3
 
+from . import __version__
 from .analysis import DensityResult, compute_density
 from .pms_parser import PMSParser
 
@@ -48,6 +49,7 @@ class ChartAnalysis:
     subtitle: str | None
     md5: str | None
     sha256: str | None
+    analysis_version: str | None = None
 
 
 SUPPORTED_SUFFIXES = {".csv", ".json"}
@@ -101,6 +103,7 @@ def analyze_table(
                 average_density=0.0,
                 cms_density=0.0,
                 chm_density=0.0,
+                effective_gauge_increase=0.0,
                 density_change=0.0,
                 high_density_occupancy_rate=0.0,
                 terminal_density=0.0,
@@ -130,6 +133,7 @@ def analyze_table(
                     subtitle=entry.subtitle,
                     md5=entry.md5,
                     sha256=entry.sha256,
+                    analysis_version=__version__,
                 )
             )
             continue
@@ -155,6 +159,7 @@ def analyze_table(
                 subtitle=parse_result.subtitle,
                 md5=entry.md5,
                 sha256=entry.sha256,
+                analysis_version=__version__,
             )
         )
 

@@ -15,6 +15,7 @@ class DensityResult:
     average_density: float
     cms_density: float
     chm_density: float
+    effective_gauge_increase: float
     density_change: float
     high_density_occupancy_rate: float
     terminal_density: float
@@ -52,6 +53,7 @@ def compute_density(
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            effective_gauge_increase=0.0,
             density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
@@ -71,8 +73,10 @@ def compute_density(
         )
 
     note_count = len(notes)
-    # Trim leading/trailing silence to avoid skewing density
-    start_time = notes[0].time
+    # Match beatoraja-style one-second buckets: drop whole empty seconds before
+    # the first note, and assign notes on an exact second boundary to the
+    # preceding bucket.
+    start_time = floor(notes[0].time / bin_size) * bin_size
     end_time = notes[-1].time
     duration = max(end_time - start_time, 1e-6)
 
@@ -80,7 +84,8 @@ def compute_density(
     per_second_by_key: List[List[int]] = [[0 for _ in range(9)] for _ in range(num_bins)]
     for note in notes:
         adjusted = max(note.time - start_time, 0.0)
-        index = min(int(adjusted // bin_size), num_bins - 1)
+        index = max(ceil(adjusted / bin_size) - 1, 0)
+        index = min(index, num_bins - 1)
         per_second_by_key[index][note.key_index] += 1
 
     per_second_total = [sum(row) for row in per_second_by_key]
@@ -97,7 +102,7 @@ def compute_density(
     terminal_gustiness = 0.0
     start_bin = len(per_second_total)
     terminal_window_used: float | None = None
-    if total_value and note_count > 0:
+    if total_value is not None and note_count > 0:
         gauge_rate = total_value / note_count
         if gauge_rate > 0:
             required_notes = ceil((85.0 - 2.0) / gauge_rate)
@@ -140,6 +145,7 @@ def compute_density(
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    effective_gauge_increase = compute_effective_gauge_increase(chm_density, total_value, note_count)
     density_change = 0.0
     if per_second_total:
         change_series = [0] + per_second_total + [0]
@@ -203,6 +209,7 @@ def compute_density(
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        effective_gauge_increase=effective_gauge_increase,
         density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
@@ -230,6 +237,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
             "average_density": 0.0,
             "cms_density": 0.0,
             "chm_density": 0.0,
+            "effective_gauge_increase": 0.0,
             "density_change": 0.0,
             "high_density_occupancy_rate": 0.0,
             "terminal_density": 0.0,
@@ -251,6 +259,7 @@ def summarize_history(results: Iterable[DensityResult]) -> Dict[str, float]:
         "average_density": sum(r.average_density for r in totals) / len(totals),
         "cms_density": sum(r.cms_density for r in totals) / len(totals),
         "chm_density": sum(r.chm_density for r in totals) / len(totals),
+        "effective_gauge_increase": sum(r.effective_gauge_increase for r in totals) / len(totals),
         "density_change": sum(r.density_change for r in totals) / len(totals),
         "high_density_occupancy_rate": sum(r.high_density_occupancy_rate for r in totals) / len(totals),
         "terminal_density": sum(r.terminal_density for r in totals) / len(totals),
@@ -275,9 +284,23 @@ def aggregate_by_difficulty(grouped: Dict[str, List[DensityResult]]) -> Dict[str
     return summary
 
 
+def compute_effective_gauge_increase(
+    chm_density: float,
+    total_value: float | None,
+    note_count: int,
+) -> float:
+    if total_value is None or note_count <= 0:
+        return 0.0
+    gauge_rate = total_value / note_count
+    if gauge_rate <= 0:
+        return 0.0
+    return chm_density * gauge_rate
+
+
 __all__ = [
     "DensityResult",
     "compute_density",
+    "compute_effective_gauge_increase",
     "summarize_history",
     "aggregate_by_difficulty",
 ]

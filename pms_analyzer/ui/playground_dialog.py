@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-from ..analysis import DensityResult
+from ..analysis import DensityResult, compute_effective_gauge_increase
 from ..theme import apply_app_palette
 from .charts import StackedDensityChart
 
@@ -203,6 +203,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            effective_gauge_increase=0.0,
             density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
@@ -291,6 +292,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
         else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    effective_gauge_increase = compute_effective_gauge_increase(chm_density, total_value, total_notes)
     density_change = 0.0
     if trimmed:
         change_series = [0] + trimmed + [0]
@@ -355,6 +357,7 @@ def compute_playground_density(per_second_total: list[int], total_value: int | N
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        effective_gauge_increase=effective_gauge_increase,
         density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
@@ -511,6 +514,13 @@ class PlaygroundDialog(QDialog):
             <p class="formula">$$\\text{{体感密度 (CHM)}} = \\frac{{\\sum n_t^2}}{{\\sum n_t}}$$</p>
             <p class="formula-note">分子の \\(\\sum n_t^2\\) は密度に二乗の重み付けをし、高密度区間を強調しています。分母の \\(\\sum n_t\\) は全体の密度の合計です。</p>
             <p>体感密度は高密度区間に強く反応するため平均密度より大きい値になりやすく、低密度区間の多い譜面ほど両者の乖離が大きくなります。</p>
+           </section>
+
+          <section>
+            <h2>体感ゲージ増加量</h2>
+            <p><b>体感ゲージ増加量</b>は、体感密度に 1 ノーツあたりのゲージ増加率を掛けた値です。</p>
+            <p class="formula">$$\\text{{体感ゲージ増加量}} = \\text{{体感密度}} \\times \\frac{{\\text{{TOTAL}}}}{{\\text{{NOTES}}}}$$</p>
+            <p class="formula-note">算出に体感密度を使用しているため、いわば曲中の難所区間におけるゲージ回復のための許容罰量の指標となります。</p>
           </section>
 
           <section>
@@ -640,6 +650,7 @@ class PlaygroundDialog(QDialog):
         center_labels = [
             ("average_density", "平均密度"),
             ("chm_density", "体感密度"),
+            ("effective_gauge_increase", "体感ゲージ増加量"),
             ("high_density_occupancy_rate", "高密度占有率"),
             ("density_change", "密度変化量"),
             ("gustiness", "突風度数"),
@@ -747,6 +758,7 @@ class PlaygroundDialog(QDialog):
         set_text("max_density", f"{density.max_density:.0f} note/s")
         set_text("average_density", f"{density.average_density:.2f} note/s")
         set_text("chm_density", f"{density.chm_density:.2f} note/s")
+        set_text("effective_gauge_increase", f"{density.effective_gauge_increase:.2f} gauge/s")
         set_text("high_density_occupancy_rate", f"{density.high_density_occupancy_rate:.2f} %")
         set_text("density_change", f"{density.density_change:.3f}")
         terminal_available = density.terminal_window is not None and density.terminal_window > 0

@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+from pytest import approx
+
+from pms_analyzer import __version__
 from pms_analyzer import storage
 from pms_analyzer.analysis import DensityResult
 from pms_analyzer.difficulty_table import ChartAnalysis, DifficultyEntry, DifficultyTable
@@ -32,6 +35,7 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
         average_density=1.5,
         cms_density=1.5,
         chm_density=1.5,
+        effective_gauge_increase=60.0,
         density_change=0.5,
         high_density_occupancy_rate=50.0,
         terminal_density=0.5,
@@ -60,6 +64,7 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
         subtitle=entry.subtitle,
         md5=entry.md5,
         sha256=entry.sha256,
+        analysis_version=__version__,
     )
     table = DifficultyTable(name="example", entries=[entry], symbol="☆")
 
@@ -69,7 +74,9 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
     raw_cache = json.loads(storage.DIFFICULTY_CACHE_PATH.read_text(encoding="utf-8"))
     assert url in raw_cache
     assert "analyses" in raw_cache[url]
+    assert raw_cache[url]["tool_version"] == __version__
     assert raw_cache[url]["analyses"]
+    assert raw_cache[url]["analyses"][0]["analysis_version"] == __version__
     assert set(raw_cache[url]["analyses"][0]["density"].keys()) == {
         "per_second_total",
         "per_second_by_key",
@@ -85,4 +92,6 @@ def test_cached_difficulty_includes_density(monkeypatch, tmp_path: Path) -> None
     assert loaded_analysis.density.high_density_occupancy_rate == 100.0
     assert loaded_analysis.density.average_density == 1.5
     assert loaded_analysis.density.terminal_density == 1.5
+    assert loaded_analysis.density.effective_gauge_increase == approx((5.0 / 3.0) * 40.0)
     assert loaded_analysis.resolved_path == entry.chart_path
+    assert loaded_analysis.analysis_version == __version__

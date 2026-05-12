@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Callable, Dict, List, Optional
 
 import matplotlib
@@ -710,6 +711,8 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         level_order: Optional[List[str]] = None,
         color_by_level: bool = True,
         show_regression: bool = True,
+        show_legend: bool = True,
+        stats_text: str = "",
         x_limits: Optional[tuple[float, float]] = None,
         y_limits: Optional[tuple[float, float]] = None,
     ) -> None:
@@ -720,6 +723,8 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             "level_order": level_order,
             "color_by_level": color_by_level,
             "show_regression": show_regression,
+            "show_legend": show_legend,
+            "stats_text": stats_text,
             "x_limits": x_limits,
             "y_limits": y_limits,
         }
@@ -727,6 +732,8 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         dark = self._is_dark_mode()
         self._style_axes(x_label=x_label, y_label=y_label, dark=dark)
         if not points:
+            self._draw_stats_text(stats_text, dark=dark)
+            self._apply_layout()
             self.draw()
             return
 
@@ -741,7 +748,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
                 xs = [x for x, _ in grouped]
                 ys = [y for _, y in grouped]
                 self.ax.scatter(xs, ys, color=color_map(idx), alpha=0.82, label=level)
-            if len(ordered_levels) <= 12:
+            if show_legend and len(ordered_levels) <= 12:
                 legend = self.ax.legend(facecolor="#2A2A2A" if dark else "#FFFFFF", framealpha=0.85, loc="best")
                 for text in legend.get_texts():
                     text.set_color("#E6E6E6" if dark else "#1D2835")
@@ -763,7 +770,8 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             self.ax.set_xlim(*x_limits)
         if y_limits:
             self.ax.set_ylim(*y_limits)
-        self.figure.tight_layout()
+        self._draw_stats_text(stats_text, dark=dark)
+        self._apply_layout()
         self.draw()
 
     def _redraw_last_plot(self) -> None:
@@ -777,12 +785,46 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             level_order=self._last_plot_state["level_order"],
             color_by_level=self._last_plot_state["color_by_level"],
             show_regression=self._last_plot_state["show_regression"],
+            show_legend=self._last_plot_state["show_legend"],
+            stats_text=self._last_plot_state["stats_text"],
             x_limits=self._last_plot_state["x_limits"],
             y_limits=self._last_plot_state["y_limits"],
         )
 
+    def _draw_stats_text(self, stats_text: str, *, dark: bool) -> None:
+        if not stats_text:
+            return
+        self.ax.text(
+            0.99,
+            0.02,
+            stats_text,
+            transform=self.ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            color="#E6E6E6" if dark else "#1D2835",
+            bbox={
+                "boxstyle": "round,pad=0.28",
+                "facecolor": "#1f1f1f" if dark else "#FFFFFF",
+                "edgecolor": "#666666" if dark else "#C8D1DC",
+                "alpha": 0.82,
+            },
+            zorder=6,
+        )
+
+    def _apply_layout(self) -> None:
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "error",
+                    message=r"Tight layout not applied.*",
+                    category=UserWarning,
+                )
+                self.figure.tight_layout(pad=1.1)
+        except UserWarning:
+            self.figure.subplots_adjust(left=0.12, right=0.98, bottom=0.18, top=0.94)
+
     def _handle_resize_redraw(self) -> None:
-        self.figure.tight_layout()
         self._redraw_last_plot()
 
     def _schedule_resize_redraw(self) -> None:

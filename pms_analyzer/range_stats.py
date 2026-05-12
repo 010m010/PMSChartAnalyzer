@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Sequence
 
 from .pms_parser import Note
+from .analysis import compute_effective_gauge_increase
 
 
 @dataclass
@@ -17,6 +18,7 @@ class RangeSelectionStats:
     rms_density: float
     cms_density: float
     chm_density: float
+    effective_gauge_increase: float | None
 
 
 def compute_range_rms(per_second: List[int], bin_size: float, start: float, end: float) -> float:
@@ -115,6 +117,11 @@ def calculate_range_selection_stats(
     rms_density = compute_range_rms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
     cms_density = compute_range_cms(per_second_total, resolved_bin_size, start_seconds, end_seconds)
     chm_density = compute_range_chm(per_second_total, resolved_bin_size, start_seconds, end_seconds)
+    effective_gauge_increase = (
+        None
+        if total_value is None or not notes
+        else compute_effective_gauge_increase(chm_density, total_value, len(notes))
+    )
 
     return RangeSelectionStats(
         start_seconds=start_seconds,
@@ -126,6 +133,7 @@ def calculate_range_selection_stats(
         rms_density=rms_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        effective_gauge_increase=effective_gauge_increase,
     )
 
 
