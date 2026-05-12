@@ -41,3 +41,4 @@ def test_range_selection_stats_includes_cms_density() -> None:
     assert stats.cms_density > 0
     assert stats.rms_density > 0
     assert stats.chm_density > 0
+    assert stats.effective_gauge_increase == approx(stats.chm_density * (100.0 / len(notes)))

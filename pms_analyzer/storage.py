@@ -6,7 +6,8 @@ from math import ceil, floor
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .analysis import DensityResult
+from . import __version__
+from .analysis import DensityResult, compute_effective_gauge_increase
 from .difficulty_table import ChartAnalysis, DifficultyEntry, DifficultyTable
 
 CONFIG_DIR = Path.home() / ".pms_chart_analyzer"
@@ -143,6 +144,7 @@ def history_by_difficulty() -> Dict[str, List[DensityResult]]:
                 average_density=float(metrics.get("average_density", 0.0)),
                 cms_density=float(metrics.get("cms_density", 0.0)),
                 chm_density=float(metrics.get("chm_density", 0.0)),
+                effective_gauge_increase=float(metrics.get("effective_gauge_increase", 0.0)),
                 density_change=float(metrics.get("density_change", 0.0)),
                 high_density_occupancy_rate=float(metrics.get("high_density_occupancy_rate", 0.0)),
                 terminal_density=float(metrics.get("terminal_density", 0.0)),
@@ -212,6 +214,7 @@ def _recompute_density_metrics(
             average_density=0.0,
             cms_density=0.0,
             chm_density=0.0,
+            effective_gauge_increase=0.0,
             density_change=0.0,
             high_density_occupancy_rate=0.0,
             terminal_density=0.0,
@@ -290,6 +293,7 @@ def _recompute_density_metrics(
         (sum(val**3 for val in non_zero_bins) / len(non_zero_bins)) ** (1.0 / 3.0) if non_zero_bins else 0.0
     )
     chm_density = sum(val * val for val in non_zero_bins) / sum(non_zero_bins) if non_zero_bins else 0.0
+    effective_gauge_increase = compute_effective_gauge_increase(chm_density, total_value, total_notes)
     density_change = 0.0
     if per_second_total:
         change_series = [0] + per_second_total + [0]
@@ -351,6 +355,7 @@ def _recompute_density_metrics(
         average_density=average_density,
         cms_density=cms_density,
         chm_density=chm_density,
+        effective_gauge_increase=effective_gauge_increase,
         density_change=density_change,
         high_density_occupancy_rate=high_density_occupancy_rate,
         terminal_density=terminal_density,
@@ -378,6 +383,7 @@ def _serialize_analysis(analysis: ChartAnalysis, index: int) -> dict[str, object
         "subtitle": analysis.subtitle,
         "md5": analysis.md5,
         "sha256": analysis.sha256,
+        "analysis_version": analysis.analysis_version,
         "note_count": analysis.note_count,
         "total_value": analysis.total_value,
         "resolved_path": str(analysis.resolved_path) if analysis.resolved_path else None,
@@ -385,7 +391,12 @@ def _serialize_analysis(analysis: ChartAnalysis, index: int) -> dict[str, object
     }
 
 
-def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyEntry]) -> list[ChartAnalysis]:
+def _deserialize_cached_analyses(
+    raw_analyses: object,
+    entries: list[DifficultyEntry],
+    *,
+    fallback_version: str | None = None,
+) -> list[ChartAnalysis]:
     if not isinstance(raw_analyses, list):
         return []
     analyses: list[ChartAnalysis] = []
@@ -411,6 +422,7 @@ def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyE
             total_value_val: Optional[float] = float(total_value) if total_value is not None else None
         except (TypeError, ValueError):
             total_value_val = None
+        analysis_version = item.get("analysis_version") or item.get("tool_version") or fallback_version
         density = _density_from_dict(item.get("density"), total_value=total_value_val)
         if density is None:
             continue
@@ -428,6 +440,7 @@ def _deserialize_cached_analyses(raw_analyses: object, entries: list[DifficultyE
                 subtitle=item.get("subtitle") or entry.subtitle,
                 md5=item.get("md5") or entry.md5,
                 sha256=item.get("sha256") or entry.sha256,
+                analysis_version=str(analysis_version) if analysis_version else None,
             )
         )
     return analyses
@@ -454,7 +467,13 @@ def save_cached_difficulty_table(url: str, table: DifficultyTable, analyses: lis
     analyses_payload = []
     for idx, analysis in enumerate(analyses or []):
         analyses_payload.append(_serialize_analysis(analysis, idx))
-    cache[url] = {"name": table.name, "symbol": table.symbol, "entries": entries, "analyses": analyses_payload}
+    cache[url] = {
+        "name": table.name,
+        "symbol": table.symbol,
+        "tool_version": __version__,
+        "entries": entries,
+        "analyses": analyses_payload,
+    }
     DIFFICULTY_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -497,7 +516,9 @@ def load_cached_difficulty_data(url: str) -> Optional[CachedDifficultyData]:
         )
     name = raw_table.get("name") or Path(url).stem or "table"
     symbol = raw_table.get("symbol") if isinstance(raw_table.get("symbol"), str) else None
-    analyses = _deserialize_cached_analyses(raw_table.get("analyses"), entries)
+    raw_tool_version = raw_table.get("tool_version")
+    fallback_version = raw_tool_version if isinstance(raw_tool_version, str) else None
+    analyses = _deserialize_cached_analyses(raw_table.get("analyses"), entries, fallback_version=fallback_version)
     return CachedDifficultyData(table=DifficultyTable(name=name, entries=entries, symbol=symbol), analyses=analyses)
 
 

@@ -73,7 +73,7 @@ from ..storage import (
     save_cached_difficulty_table,
     update_saved_table_name,
 )
-from .charts import BoxPlotCanvas, DifficultyScatterChart, StackedDensityChart
+from .charts import BoxPlotCanvas, CorrelationScatterChart, DifficultyScatterChart, StackedDensityChart
 from .playground_dialog import PlaygroundDialog
 from PyQt6.sip import isdeleted
 
@@ -106,6 +106,70 @@ def _quantiles(values: List[float]) -> Dict[str, float | None]:
     }
 
 
+def _pearson_correlation(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    mean_x = mean(xs)
+    mean_y = mean(ys)
+    numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    denom_x = sum((x - mean_x) ** 2 for x in xs)
+    denom_y = sum((y - mean_y) ** 2 for y in ys)
+    denominator = (denom_x * denom_y) ** 0.5
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _rank_values(values: list[float]) -> list[float]:
+    indexed = sorted(enumerate(values), key=lambda item: item[1])
+    ranks = [0.0] * len(values)
+    idx = 0
+    while idx < len(indexed):
+        end = idx + 1
+        while end < len(indexed) and indexed[end][1] == indexed[idx][1]:
+            end += 1
+        rank = (idx + 1 + end) / 2.0
+        for original_idx, _ in indexed[idx:end]:
+            ranks[original_idx] = rank
+        idx = end
+    return ranks
+
+
+def _spearman_correlation(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    return _pearson_correlation(_rank_values(xs), _rank_values(ys))
+
+
+def _format_correlation(value: float | None) -> str:
+    return "-" if value is None else f"{value:.3f}"
+
+
+def _numeric_version_key(version: str | None) -> tuple[int, ...]:
+    if not version:
+        return ()
+    parts: list[int] = []
+    for raw_part in version.replace("-", ".").replace("_", ".").split("."):
+        digits = ""
+        for char in raw_part:
+            if char.isdigit():
+                digits += char
+            elif digits:
+                break
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts)
+
+
+def _is_version_older(version: str | None, current_version: str) -> bool:
+    version_key = _numeric_version_key(version)
+    current_key = _numeric_version_key(current_version)
+    if not version_key:
+        return True
+    width = max(len(version_key), len(current_key))
+    return version_key + (0,) * (width - len(version_key)) < current_key + (0,) * (width - len(current_key))
+
+
 @dataclass
 class NumericFilterCondition:
     column: Optional[str] = None
@@ -121,6 +185,7 @@ FILTERABLE_COLUMNS = [
     "最大秒間密度",
     "平均密度",
     "体感密度",
+    "体感ゲージ増加量",
     "高密度占有率",
     "密度変化量",
     "突風度数",
@@ -336,6 +401,7 @@ class SingleAnalysisTab(QWidget):
             ("max_density", "最大秒間密度"),
             ("average_density", "平均密度"),
             ("chm_density", "体感密度"),
+            ("effective_gauge_increase", "体感ゲージ増加量"),
             ("high_density_occupancy_rate", "高密度占有率"),
             ("density_change", "密度変化量"),
             ("gustiness", "突風度数"),
@@ -364,6 +430,7 @@ class SingleAnalysisTab(QWidget):
             ("range_max", "最大秒間密度"),
             ("range_avg", "平均密度"),
             ("range_chm", "体感密度"),
+            ("range_effective_gauge", "体感ゲージ増加量"),
         ]
         for row, (key, title) in enumerate(range_fields):
             lbl = QLabel(title)
@@ -527,6 +594,7 @@ class SingleAnalysisTab(QWidget):
                 "average_density": density.average_density,
                 "cms_density": density.cms_density,
                 "chm_density": density.chm_density,
+                "effective_gauge_increase": density.effective_gauge_increase,
                 "density_change": density.density_change,
                 "high_density_occupancy_rate": density.high_density_occupancy_rate,
                 "terminal_density": density.terminal_density,
@@ -559,6 +627,8 @@ class SingleAnalysisTab(QWidget):
         self._set_label_text(self.metrics_labels["max_density"], f"{density.max_density:.0f} note/s")
         self._set_label_text(self.metrics_labels["average_density"], f"{density.average_density:.2f} note/s")
         self._set_label_text(self.metrics_labels["chm_density"], f"{density.chm_density:.2f} note/s")
+        effective_gauge_text = "-" if total_value is None else f"{density.effective_gauge_increase:.2f} gauge/s"
+        self._set_label_text(self.metrics_labels["effective_gauge_increase"], effective_gauge_text)
         self._set_label_text(
             self.metrics_labels["high_density_occupancy_rate"],
             f"{density.high_density_occupancy_rate:.2f} %",
@@ -681,6 +751,7 @@ class SingleAnalysisTab(QWidget):
             "range_max": "-",
             "range_avg": "-",
             "range_chm": "-",
+            "range_effective_gauge": "-",
         }
         for key, default in defaults.items():
             label = self.range_labels.get(key)
@@ -753,6 +824,13 @@ class SingleAnalysisTab(QWidget):
             self._set_label_text(self.range_labels["range_avg"], f"{stats.average_density:.2f} note/s")
         if "range_chm" in self.range_labels:
             self._set_label_text(self.range_labels["range_chm"], f"{stats.chm_density:.2f} note/s")
+        if "range_effective_gauge" in self.range_labels:
+            effective_text = (
+                "未定義"
+                if stats.effective_gauge_increase is None
+                else f"{stats.effective_gauge_increase:.2f} gauge/s"
+            )
+            self._set_label_text(self.range_labels["range_effective_gauge"], effective_text)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
         if event.mimeData().hasUrls():
@@ -780,6 +858,8 @@ class DifficultyTab(QWidget):
         self.difficulty_chart = DifficultyScatterChart(self)
         self.box_chart = BoxPlotCanvas(self)
         self.box_chart.hide()
+        self.correlation_chart = CorrelationScatterChart(self)
+        self.correlation_chart.hide()
         self._table_headers = [
             "LEVEL",
             "曲名",
@@ -789,6 +869,7 @@ class DifficultyTab(QWidget):
             "最大秒間密度",
             "平均密度",
             "体感密度",
+            "体感ゲージ増加量",
             "高密度占有率",
             "密度変化量",
             "突風度数",
@@ -798,6 +879,7 @@ class DifficultyTab(QWidget):
             "md5",
             "sha256",
             "Path",
+            "取得ver",
         ]
         self.table_widget = QTableWidget(0, len(self._table_headers))
         self.table_widget.setHorizontalHeaderLabels(self._table_headers)
@@ -824,9 +906,12 @@ class DifficultyTab(QWidget):
         self.metric_selector.addItems(
             [
                 "NOTES数",
+                "TOTAL値",
+                "増加率",
                 "最大秒間密度",
                 "平均密度",
                 "体感密度",
+                "体感ゲージ増加量",
                 "高密度占有率",
                 "密度変化量",
                 "突風度数",
@@ -835,20 +920,50 @@ class DifficultyTab(QWidget):
                 "終端密度差",
             ]
         )
+        self.correlation_x_selector = QComboBox()
+        self.correlation_x_selector.addItems(
+            [self.metric_selector.itemText(idx) for idx in range(self.metric_selector.count())]
+        )
+        default_x_index = self.correlation_x_selector.findText("平均密度")
+        if default_x_index >= 0:
+            self.correlation_x_selector.setCurrentIndex(default_x_index)
         self.chart_type_selector = QComboBox()
-        self.chart_type_selector.addItems(["箱ひげ図", "散布図"])
+        self.chart_type_selector.addItems(["箱ひげ図", "散布図", "相関散布図"])
+        self.graph_label = QLabel("グラフ:")
+        self.metric_label = QLabel("縦軸:")
+        self.correlation_x_label = QLabel("横軸:")
+        self.correlation_color_checkbox = QCheckBox("LEVEL 色分け")
+        self.correlation_color_checkbox.setChecked(True)
+        self.correlation_regression_checkbox = QCheckBox("回帰線")
+        self.correlation_regression_checkbox.setChecked(True)
+        self.correlation_legend_checkbox = QCheckBox("凡例を表示")
+        self.correlation_legend_checkbox.setChecked(True)
+        self.graph_settings_button = QPushButton("グラフ設定")
         self.scale_min_input = QLineEdit()
         self.scale_min_input.setPlaceholderText("縦軸の最小値")
         self.scale_max_input = QLineEdit()
         self.scale_max_input.setPlaceholderText("縦軸の最大値")
+        self.x_scale_min_input = QLineEdit()
+        self.x_scale_min_input.setPlaceholderText("横軸の最小値")
+        self.x_scale_max_input = QLineEdit()
+        self.x_scale_max_input.setPlaceholderText("横軸の最大値")
+        self.scale_y_label = QLabel("縦軸:")
+        self.scale_x_label = QLabel("横軸:")
+        self.scale_y_separator = QLabel("～")
+        self.scale_x_separator = QLabel("～")
         self.scale_button = QPushButton("更新")
         self.scale_reset_button = QPushButton("リセット")
         self.show_unresolved_checkbox = QCheckBox("未解析を表示")
         self.show_total_undefined_checkbox = QCheckBox("TOTAL 未定義を表示")
+        self.show_old_version_checkbox = QCheckBox("取得verの古い譜面を表示する")
+        self.show_old_version_checkbox.setChecked(True)
         self._saved_show_unresolved = False
         self._saved_show_total_undefined = False
+        self._saved_show_old_version = True
         self._manual_y_min: float | None = None
         self._manual_y_max: float | None = None
+        self._manual_x_min: float | None = None
+        self._manual_x_max: float | None = None
         self.summary_metric_selector = QComboBox()
         self.summary_metric_selector.addItems(
             [
@@ -857,6 +972,7 @@ class DifficultyTab(QWidget):
                 "最大秒間密度",
                 "平均密度",
                 "体感密度",
+                "体感ゲージ増加量",
                 "高密度占有率",
                 "密度変化量",
                 "突風度数",
@@ -954,27 +1070,63 @@ class DifficultyTab(QWidget):
         metric_layout.addWidget(self.filter_button)
         metric_layout.addWidget(self.filter_status_label)
         metric_layout.addStretch()
-        metric_layout.addWidget(QLabel("縦軸:"))
-        metric_layout.addWidget(self.metric_selector)
-        metric_layout.addWidget(QLabel("グラフ:"))
+        metric_layout.addWidget(self.graph_label)
         metric_layout.addWidget(self.chart_type_selector)
-        metric_layout.addWidget(QLabel("スケール調整:"))
-        metric_layout.addWidget(self.scale_min_input)
-        metric_layout.addWidget(QLabel("～"))
-        metric_layout.addWidget(self.scale_max_input)
-        metric_layout.addWidget(self.scale_button)
-        metric_layout.addWidget(self.scale_reset_button)
+        metric_layout.addWidget(self.metric_label)
+        metric_layout.addWidget(self.metric_selector)
+        metric_layout.addWidget(self.correlation_x_label)
+        metric_layout.addWidget(self.correlation_x_selector)
+        metric_layout.addWidget(self.graph_settings_button)
+
+        self.graph_settings_dialog = QDialog(self)
+        self.graph_settings_dialog.setWindowTitle("グラフ設定")
+        graph_settings_layout = QVBoxLayout(self.graph_settings_dialog)
+
+        scale_group = QGroupBox("スケール調整")
+        scale_layout = QGridLayout()
+        scale_layout.addWidget(self.scale_y_label, 0, 0)
+        scale_layout.addWidget(self.scale_min_input, 0, 1)
+        scale_layout.addWidget(self.scale_y_separator, 0, 2)
+        scale_layout.addWidget(self.scale_max_input, 0, 3)
+        scale_layout.addWidget(self.scale_x_label, 1, 0)
+        scale_layout.addWidget(self.x_scale_min_input, 1, 1)
+        scale_layout.addWidget(self.scale_x_separator, 1, 2)
+        scale_layout.addWidget(self.x_scale_max_input, 1, 3)
+        scale_button_layout = QHBoxLayout()
+        scale_button_layout.addStretch()
+        scale_button_layout.addWidget(self.scale_button)
+        scale_button_layout.addWidget(self.scale_reset_button)
+        scale_layout.addLayout(scale_button_layout, 2, 0, 1, 4)
+        scale_group.setLayout(scale_layout)
+        graph_settings_layout.addWidget(scale_group)
+
+        correlation_group = QGroupBox("相関散布図")
+        correlation_layout = QVBoxLayout()
+        correlation_layout.addWidget(self.correlation_color_checkbox)
+        correlation_layout.addWidget(self.correlation_regression_checkbox)
+        correlation_layout.addWidget(self.correlation_legend_checkbox)
+        correlation_group.setLayout(correlation_layout)
+        graph_settings_layout.addWidget(correlation_group)
+        self.correlation_settings_group = correlation_group
+
+        graph_settings_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        graph_settings_buttons.rejected.connect(self.graph_settings_dialog.close)
+        graph_settings_layout.addWidget(graph_settings_buttons)
 
         chart_area = QWidget()
         chart_area_layout = QVBoxLayout()
         chart_area_layout.setContentsMargins(0, 0, 0, 0)
-        chart_area_layout.addLayout(metric_layout)
-        chart_area_layout.addWidget(self.difficulty_chart)
-        chart_area_layout.addWidget(self.box_chart)
+        self.difficulty_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.box_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.correlation_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        chart_area_layout.addLayout(metric_layout, 0)
+        chart_area_layout.addWidget(self.difficulty_chart, 1)
+        chart_area_layout.addWidget(self.box_chart, 1)
+        chart_area_layout.addWidget(self.correlation_chart, 1)
         overlay_toggle_layout = QHBoxLayout()
         overlay_toggle_layout.addStretch()
         overlay_toggle_layout.addWidget(self.single_overlay_checkbox)
-        chart_area_layout.addLayout(overlay_toggle_layout)
+        chart_area_layout.addLayout(overlay_toggle_layout, 0)
         chart_area.setLayout(chart_area_layout)
 
         chart_layout.addWidget(chart_area)
@@ -995,6 +1147,7 @@ class DifficultyTab(QWidget):
         filter_toggle_row = QHBoxLayout()
         filter_toggle_row.addWidget(self.show_unresolved_checkbox)
         filter_toggle_row.addWidget(self.show_total_undefined_checkbox)
+        filter_toggle_row.addWidget(self.show_old_version_checkbox)
         filter_toggle_row.addStretch()
         visibility_layout.addLayout(filter_toggle_row)
         table_tab_layout.addLayout(visibility_layout)
@@ -1030,19 +1183,26 @@ class DifficultyTab(QWidget):
         self.analyze_button.clicked.connect(self._analyze_table)
         self.url_list.currentIndexChanged.connect(self._on_select_saved)
         self.metric_selector.currentTextChanged.connect(self._refresh_chart_only)
-        self.chart_type_selector.currentTextChanged.connect(lambda: self._refresh_chart_only(clear_scale=True))
+        self.correlation_x_selector.currentTextChanged.connect(lambda _text: self._refresh_chart_only())
+        self.chart_type_selector.currentTextChanged.connect(self._on_chart_type_changed)
         self.summary_metric_selector.currentTextChanged.connect(self._render_summary)
+        self.graph_settings_button.clicked.connect(self._open_graph_settings_dialog)
         self.scale_button.clicked.connect(self._apply_manual_scale)
         self.scale_reset_button.clicked.connect(self._reset_manual_scale)
         self.delete_button.clicked.connect(self._delete_saved)
         self.filter_button.clicked.connect(self._open_filter_dialog)
         self.table_widget.customContextMenuRequested.connect(self._show_table_context_menu)
         self.single_overlay_checkbox.toggled.connect(self._refresh_chart_only)
+        self.correlation_color_checkbox.toggled.connect(lambda: self._refresh_chart_only())
+        self.correlation_regression_checkbox.toggled.connect(lambda: self._refresh_chart_only())
+        self.correlation_legend_checkbox.toggled.connect(lambda: self._refresh_chart_only())
         self.show_unresolved_checkbox.toggled.connect(self._on_visibility_option_changed)
         self.show_total_undefined_checkbox.toggled.connect(self._on_visibility_option_changed)
+        self.show_old_version_checkbox.toggled.connect(self._on_visibility_option_changed)
         self.column_visibility_button.clicked.connect(self._open_column_visibility_dialog)
         self.export_table_button.clicked.connect(self._export_table_csv)
         self.export_summary_button.clicked.connect(self._export_summary_csv)
+        self._update_chart_mode_controls()
         self._apply_column_visibility()
         self._load_filter_state()
         self._refresh_saved_urls()
@@ -1051,7 +1211,40 @@ class DifficultyTab(QWidget):
     def set_theme_mode(self, mode: str) -> None:
         self.difficulty_chart.set_theme_mode(mode)
         self.box_chart.set_theme_mode(mode)
+        self.correlation_chart.set_theme_mode(mode)
         self._render_chart()
+
+    def _on_chart_type_changed(self, _text: str = "") -> None:
+        self._update_chart_mode_controls()
+        self._refresh_chart_only(clear_scale=True)
+
+    def _is_correlation_chart_selected(self) -> bool:
+        return self.chart_type_selector.currentText() == "相関散布図"
+
+    def _update_chart_mode_controls(self) -> None:
+        is_correlation = self._is_correlation_chart_selected()
+        horizontal_widgets = (
+            self.correlation_x_label,
+            self.correlation_x_selector,
+            self.scale_x_label,
+            self.x_scale_min_input,
+            self.scale_x_separator,
+            self.x_scale_max_input,
+        )
+        for widget in horizontal_widgets:
+            widget.setEnabled(is_correlation)
+        self.correlation_color_checkbox.setEnabled(is_correlation)
+        self.correlation_regression_checkbox.setEnabled(is_correlation)
+        self.correlation_legend_checkbox.setEnabled(is_correlation and self.correlation_color_checkbox.isChecked())
+        if hasattr(self, "correlation_settings_group"):
+            self.correlation_settings_group.setEnabled(is_correlation)
+        self.single_overlay_checkbox.setEnabled(not is_correlation)
+
+    def _open_graph_settings_dialog(self) -> None:
+        self._update_chart_mode_controls()
+        self.graph_settings_dialog.show()
+        self.graph_settings_dialog.raise_()
+        self.graph_settings_dialog.activateWindow()
 
     def _select_table(self) -> None:
         url = self.url_input.text().strip()
@@ -1257,8 +1450,12 @@ class DifficultyTab(QWidget):
         if clear_scale:
             self._manual_y_min = None
             self._manual_y_max = None
+            self._manual_x_min = None
+            self._manual_x_max = None
             self.scale_min_input.clear()
             self.scale_max_input.clear()
+            self.x_scale_min_input.clear()
+            self.x_scale_max_input.clear()
         if not self._latest_analyses:
             return
         self._render_chart()
@@ -1294,6 +1491,8 @@ class DifficultyTab(QWidget):
             self.table_widget.setItem(row, 0, level_item)
             title_item = SortableTableWidgetItem(title_text)
             title_item.setData(Qt.ItemDataRole.UserRole, title_text)
+            if self._is_analysis_version_old(analysis):
+                title_item.setForeground(QColor("#1f6feb"))
             if not analysis.resolved_path:
                 title_item.setForeground(QColor("red"))
                 title_item.setText(f"{title_text}（未解析）")
@@ -1323,24 +1522,30 @@ class DifficultyTab(QWidget):
             chm_item = SortableTableWidgetItem(f"{density.chm_density:.2f}")
             chm_item.setData(Qt.ItemDataRole.UserRole, float(density.chm_density))
             self.table_widget.setItem(row, 7, chm_item)
+            effective_gauge_text = "-" if not terminal_available else f"{density.effective_gauge_increase:.2f}"
+            effective_gauge_sort = float("-inf") if not terminal_available else float(density.effective_gauge_increase)
+            effective_gauge_item = SortableTableWidgetItem(effective_gauge_text)
+            effective_gauge_item.setData(Qt.ItemDataRole.UserRole, effective_gauge_sort)
+            self.table_widget.setItem(row, 8, effective_gauge_item)
             occupancy_item = SortableTableWidgetItem(f"{density.high_density_occupancy_rate:.2f} %")
             occupancy_item.setData(Qt.ItemDataRole.UserRole, float(density.high_density_occupancy_rate))
-            self.table_widget.setItem(row, 8, occupancy_item)
+            self.table_widget.setItem(row, 9, occupancy_item)
             density_change_item = SortableTableWidgetItem(f"{density.density_change:.3f}")
             density_change_item.setData(Qt.ItemDataRole.UserRole, float(density.density_change))
-            self.table_widget.setItem(row, 9, density_change_item)
+            self.table_widget.setItem(row, 10, density_change_item)
+            gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
+            gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
+            self.table_widget.setItem(row, 11, gust_item)
             term_text = "-" if not terminal_available else f"{density.terminal_density:.2f}"
             term_sort = float("-inf") if not terminal_available else float(density.terminal_density)
             term_item = SortableTableWidgetItem(term_text)
             term_item.setData(Qt.ItemDataRole.UserRole, term_sort)
-            self.table_widget.setItem(row, 10, term_item)
+            self.table_widget.setItem(row, 12, term_item)
             term_chm_text = "-" if not terminal_available else f"{density.terminal_chm_density:.2f}"
             term_chm_sort = float("-inf") if not terminal_available else float(density.terminal_chm_density)
             term_chm_item = SortableTableWidgetItem(term_chm_text)
             term_chm_item.setData(Qt.ItemDataRole.UserRole, term_chm_sort)
-            self.table_widget.setItem(row, 11, term_chm_item)
-            gust_item = SortableTableWidgetItem(f"{density.gustiness:.2f}")
-            gust_item.setData(Qt.ItemDataRole.UserRole, float(density.gustiness))
+            self.table_widget.setItem(row, 13, term_chm_item)
             terminal_density_diff_value: float | None = (
                 density.terminal_density_difference if terminal_available else None
             )
@@ -1352,18 +1557,21 @@ class DifficultyTab(QWidget):
             )
             terminal_density_diff_item = SortableTableWidgetItem(terminal_density_diff_text)
             terminal_density_diff_item.setData(Qt.ItemDataRole.UserRole, terminal_density_diff_sort)
-            self.table_widget.setItem(row, 12, gust_item)
-            self.table_widget.setItem(row, 13, terminal_density_diff_item)
+            self.table_widget.setItem(row, 14, terminal_density_diff_item)
             md5_item = SortableTableWidgetItem(analysis.md5 or "")
             md5_item.setData(Qt.ItemDataRole.UserRole, analysis.md5 or "")
-            self.table_widget.setItem(row, 14, md5_item)
+            self.table_widget.setItem(row, 15, md5_item)
             sha_item = SortableTableWidgetItem(analysis.sha256 or "")
             sha_item.setData(Qt.ItemDataRole.UserRole, analysis.sha256 or "")
-            self.table_widget.setItem(row, 15, sha_item)
+            self.table_widget.setItem(row, 16, sha_item)
             path_text = str(analysis.resolved_path) if analysis.resolved_path else ""
             path_item = SortableTableWidgetItem(path_text)
             path_item.setData(Qt.ItemDataRole.UserRole, path_text)
-            self.table_widget.setItem(row, 16, path_item)
+            self.table_widget.setItem(row, 17, path_item)
+            version_text = analysis.analysis_version or "-"
+            version_item = SortableTableWidgetItem(version_text)
+            version_item.setData(Qt.ItemDataRole.UserRole, _numeric_version_key(analysis.analysis_version))
+            self.table_widget.setItem(row, 18, version_item)
 
         self.table_widget.setSortingEnabled(sorting_state)
         if sorting_state and current_sort:
@@ -1408,7 +1616,56 @@ class DifficultyTab(QWidget):
             return f"{symbol}{value}"
         return value
 
+    def _render_correlation_chart(self) -> None:
+        x_metric = self.correlation_x_selector.currentText()
+        y_metric = self.metric_selector.currentText()
+        points: list[tuple[float, float, str]] = []
+        for analysis in self._latest_analyses:
+            if not self._is_chart_visible(analysis):
+                continue
+            if not analysis.resolved_path or not analysis.density.per_second_total:
+                continue
+            x_value = self._metric_value(analysis, x_metric)
+            y_value = self._metric_value(analysis, y_metric)
+            if x_value is None or y_value is None:
+                continue
+            points.append((x_value, y_value, self._format_difficulty(analysis.difficulty)))
+
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        pearson = _pearson_correlation(xs, ys)
+        spearman = _spearman_correlation(xs, ys)
+        stats_text = (
+            f"n={len(points)} / Pearson r={_format_correlation(pearson)} / "
+            f"Spearman rho={_format_correlation(spearman)}"
+        )
+        level_order = sorted({point[2] for point in points}, key=difficulty_sort_key)
+        x_limits = self._determine_x_limits(xs)
+        y_limits = self._determine_y_limits(ys)
+
+        self.box_chart.hide()
+        self.difficulty_chart.hide()
+        self.correlation_chart.show()
+        self.correlation_chart.plot(
+            points,
+            x_label=x_metric,
+            y_label=y_metric,
+            level_order=level_order,
+            color_by_level=self.correlation_color_checkbox.isChecked(),
+            show_regression=self.correlation_regression_checkbox.isChecked(),
+            show_legend=self.correlation_legend_checkbox.isChecked(),
+            stats_text=stats_text,
+            x_limits=x_limits,
+            y_limits=y_limits,
+        )
+
     def _render_chart(self) -> None:
+        self._update_chart_mode_controls()
+        if self._is_correlation_chart_selected():
+            self._render_correlation_chart()
+            return
+
+        self.correlation_chart.hide()
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
         for analysis in self._latest_analyses:
@@ -1461,12 +1718,18 @@ class DifficultyTab(QWidget):
         terminal_available = analysis.total_value is not None
         if metric == "NOTES数":
             return float(analysis.note_count or 0)
+        if metric == "TOTAL値":
+            return analysis.total_value
         if metric == "最大秒間密度":
             return density.max_density
         if metric == "平均密度":
             return density.average_density
         if metric == "体感密度":
             return density.chm_density
+        if metric == "体感ゲージ増加量":
+            if not terminal_available:
+                return None
+            return density.effective_gauge_increase
         if metric == "高密度占有率":
             return density.high_density_occupancy_rate
         if metric == "密度変化量":
@@ -1498,12 +1761,18 @@ class DifficultyTab(QWidget):
         terminal_available = self._single_overlay_total_value is not None
         if metric == "NOTES数":
             return float(self._single_overlay_note_count or 0)
+        if metric == "TOTAL値":
+            return self._single_overlay_total_value
         if metric == "最大秒間密度":
             return density.max_density
         if metric == "平均密度":
             return density.average_density
         if metric == "体感密度":
             return density.chm_density
+        if metric == "体感ゲージ増加量":
+            if not terminal_available:
+                return None
+            return density.effective_gauge_increase
         if metric == "高密度占有率":
             return density.high_density_occupancy_rate
         if metric == "密度変化量":
@@ -1573,6 +1842,20 @@ class DifficultyTab(QWidget):
             upper = lower + 1.0
         return (lower, upper)
 
+    def _determine_x_limits(self, values: List[float]) -> Optional[tuple[float, float]]:
+        if self._manual_x_min is None and self._manual_x_max is None:
+            return None
+        auto_limits = self._compute_y_limits(values) if values else None
+        lower = self._manual_x_min if self._manual_x_min is not None else (auto_limits[0] if auto_limits else 0.0)
+        upper = self._manual_x_max if self._manual_x_max is not None else (
+            auto_limits[1] if auto_limits else (lower + 1.0)
+        )
+        if values and all(val >= 0 for val in values) and lower < 0:
+            lower = 0.0
+        if lower == upper:
+            upper = lower + 1.0
+        return (lower, upper)
+
     def _render_summary(self) -> None:
         metric = self.summary_metric_selector.currentText()
         rows = {}
@@ -1613,43 +1896,63 @@ class DifficultyTab(QWidget):
                 self.summary_table.setItem(idx, col, QTableWidgetItem(text))
 
     def _apply_manual_scale(self) -> None:
-        min_text = self.scale_min_input.text().strip()
-        max_text = self.scale_max_input.text().strip()
-        if not min_text and not max_text:
+        y_min_text = self.scale_min_input.text().strip()
+        y_max_text = self.scale_max_input.text().strip()
+        x_min_text = self.x_scale_min_input.text().strip()
+        x_max_text = self.x_scale_max_input.text().strip()
+        use_x_scale = self._is_correlation_chart_selected()
+        if not y_min_text and not y_max_text and (not use_x_scale or (not x_min_text and not x_max_text)):
             self._manual_y_min = None
             self._manual_y_max = None
+            if use_x_scale:
+                self._manual_x_min = None
+                self._manual_x_max = None
             self._refresh_chart_only()
             return
         try:
-            min_value = float(min_text) if min_text else None
-            max_value = float(max_text) if max_text else None
-            if min_value is not None and max_value is not None and min_value >= max_value:
+            y_min_value = float(y_min_text) if y_min_text else None
+            y_max_value = float(y_max_text) if y_max_text else None
+            if y_min_value is not None and y_max_value is not None and y_min_value >= y_max_value:
                 raise ValueError
-            self._manual_y_min = min_value
-            self._manual_y_max = max_value
+            self._manual_y_min = y_min_value
+            self._manual_y_max = y_max_value
+            if use_x_scale:
+                x_min_value = float(x_min_text) if x_min_text else None
+                x_max_value = float(x_max_text) if x_max_text else None
+                if x_min_value is not None and x_max_value is not None and x_min_value >= x_max_value:
+                    raise ValueError
+                self._manual_x_min = x_min_value
+                self._manual_x_max = x_max_value
         except ValueError:
-            QMessageBox.warning(self, "不正な値", "数値を正しく入力し、最小値は最大値より小さくしてください")
+            QMessageBox.warning(self, "不正な値", "縦軸/横軸の数値を正しく入力し、最小値は最大値より小さくしてください")
             return
         self._refresh_chart_only()
 
     def _reset_manual_scale(self) -> None:
         self.scale_min_input.clear()
         self.scale_max_input.clear()
+        self.x_scale_min_input.clear()
+        self.x_scale_max_input.clear()
         self._manual_y_min = None
         self._manual_y_max = None
+        self._manual_x_min = None
+        self._manual_x_max = None
         self._refresh_chart_only()
 
     def _apply_preferred_column_widths(self) -> None:
         header = self.table_widget.horizontalHeader()
         base_width = header.defaultSectionSize() or 100
         compact_width = max(50, int(base_width * 0.6))
+        effective_gauge_width = max(150, int(base_width * 1.4))
         wide_width = int(base_width * 2)
         width_overrides = {
             "LEVEL": compact_width,
             "NOTES数": compact_width,
             "TOTAL値": compact_width,
             "増加率": compact_width,
+            "体感ゲージ増加量": effective_gauge_width,
             "曲名": wide_width,
+            "取得ver": max(80, compact_width),
         }
         for idx, label in enumerate(self._table_headers):
             if label in width_overrides:
@@ -1667,9 +1970,11 @@ class DifficultyTab(QWidget):
         self._filter_selection = set()
         self._saved_show_unresolved = False
         self._saved_show_total_undefined = False
+        self._saved_show_old_version = True
         for checkbox, value in (
             (self.show_unresolved_checkbox, self._saved_show_unresolved),
             (self.show_total_undefined_checkbox, self._saved_show_total_undefined),
+            (self.show_old_version_checkbox, self._saved_show_old_version),
         ):
             checkbox.blockSignals(True)
             checkbox.setChecked(value)
@@ -1679,6 +1984,7 @@ class DifficultyTab(QWidget):
     def _save_filter_state(self) -> None:
         self._saved_show_unresolved = self.show_unresolved_checkbox.isChecked()
         self._saved_show_total_undefined = self.show_total_undefined_checkbox.isChecked()
+        self._saved_show_old_version = self.show_old_version_checkbox.isChecked()
 
     def _update_filter_indicator(self) -> None:
         if self._is_filter_active():
@@ -1690,6 +1996,7 @@ class DifficultyTab(QWidget):
     def _on_visibility_option_changed(self) -> None:
         self._saved_show_unresolved = self.show_unresolved_checkbox.isChecked()
         self._saved_show_total_undefined = self.show_total_undefined_checkbox.isChecked()
+        self._saved_show_old_version = self.show_old_version_checkbox.isChecked()
         self._save_filter_state()
         self._render_table_and_chart()
 
@@ -1701,7 +2008,8 @@ class DifficultyTab(QWidget):
             and self._filter_selection
             and len(self._filter_selection) != len(self._available_levels)
         )
-        return has_name_filter or has_conditions or has_level_filter
+        hides_old_versions = not self.show_old_version_checkbox.isChecked()
+        return has_name_filter or has_conditions or has_level_filter or hides_old_versions
 
     def _active_filter_conditions(self) -> list[NumericFilterCondition]:
         active: list[NumericFilterCondition] = []
@@ -1737,6 +2045,7 @@ class DifficultyTab(QWidget):
             "NOTES数": 0,
             "TOTAL値": 2,
             "増加率": 2,
+            "体感ゲージ増加量": 2,
             "最大秒間密度": 0,
             "平均密度": 2,
             "体感密度": 2,
@@ -1784,7 +2093,12 @@ class DifficultyTab(QWidget):
                 return False
         return True
 
+    def _is_analysis_version_old(self, analysis: ChartAnalysis) -> bool:
+        return _is_version_older(analysis.analysis_version, __version__)
+
     def _passes_resolution_filters(self, analysis: ChartAnalysis) -> bool:
+        if self._is_analysis_version_old(analysis) and not self.show_old_version_checkbox.isChecked():
+            return False
         if analysis.resolved_path is None:
             return self.show_unresolved_checkbox.isChecked()
         if analysis.total_value is None and not self.show_total_undefined_checkbox.isChecked():
@@ -2204,6 +2518,7 @@ class DifficultyTab(QWidget):
             ["LEVEL 絞り込み", level_text],
             ["未解析譜面", "表示" if self.show_unresolved_checkbox.isChecked() else "非表示"],
             ["TOTAL 未定義", "表示" if self.show_total_undefined_checkbox.isChecked() else "非表示"],
+            ["取得verの古い譜面", "表示" if self.show_old_version_checkbox.isChecked() else "非表示"],
             ["曲名フィルター", self._song_filter_query or "なし"],
             ["数値フィルター", self._describe_active_conditions() or "なし"],
         ]
@@ -2293,6 +2608,7 @@ class DifficultyTab(QWidget):
         for checkbox, value in (
             (self.show_unresolved_checkbox, self._saved_show_unresolved),
             (self.show_total_undefined_checkbox, self._saved_show_total_undefined),
+            (self.show_old_version_checkbox, self._saved_show_old_version),
         ):
             checkbox.blockSignals(True)
             checkbox.setChecked(value)

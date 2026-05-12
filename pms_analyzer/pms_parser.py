@@ -7,26 +7,47 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 
-def _build_key_channels() -> Dict[int, int]:
-    """Map PMS/BMS channels to 9key lanes.
+def _build_normal_key_channels() -> Dict[int, int]:
+    """Map PMS 9key normal-note channels to lanes.
 
-    Pop'n Music 9key-style PMS files can place notes on multiple channel sets:
-    - 11-19: primary 1P lanes
-    - 21-29: secondary set (some creators/exporters use these)
-    - 51-59: long-note channels (treated as standard notes for density)
+    beatoraja's PMS 9key layout uses 11-15 for the left five keys and
+    22-25 for the right four keys.
     """
 
-    mapping: Dict[int, int] = {}
-    for base in (10, 20, 50):
-        for offset, key_index in enumerate(range(1, 10)):
-            mapping[base + key_index] = offset
-    return mapping
+    return {
+        11: 0,
+        12: 1,
+        13: 2,
+        14: 3,
+        15: 4,
+        22: 5,
+        23: 6,
+        24: 7,
+        25: 8,
+    }
 
 
-KEY_CHANNELS: Dict[int, int] = _build_key_channels()
-# Channels used for mines or invisible notes should be excluded from density counts.
-# Common BMS/PMS mine channels mirror key channels with the "6" suffix.
-MINE_CHANNELS: set[int] = {16, 26, 36, 46, 56, 66, 76, 86}
+def _build_long_note_channels() -> Dict[int, int]:
+    """Map PMS 9key long-note channels to lanes."""
+
+    return {
+        51: 0,
+        52: 1,
+        53: 2,
+        54: 3,
+        55: 4,
+        62: 5,
+        63: 6,
+        64: 7,
+        65: 8,
+    }
+
+
+NORMAL_KEY_CHANNELS: Dict[int, int] = _build_normal_key_channels()
+LONG_NOTE_CHANNELS: Dict[int, int] = _build_long_note_channels()
+KEY_CHANNELS: Dict[int, int] = {**NORMAL_KEY_CHANNELS, **LONG_NOTE_CHANNELS}
+# Non-PMS playable channels are intentionally ignored in 9key PMS mode.
+MINE_CHANNELS: set[int] = set()
 
 
 @dataclass
@@ -70,8 +91,9 @@ class PMSParser:
         re.IGNORECASE,
     )
 
-    def __init__(self, *, default_bpm: float = 130.0) -> None:
+    def __init__(self, *, default_bpm: float = 130.0, count_long_note_ends: bool = False) -> None:
         self.default_bpm = default_bpm
+        self.count_long_note_ends = count_long_note_ends
 
     def parse(self, path: Path | str) -> ParseResult:
         path = Path(path)
@@ -89,6 +111,8 @@ class PMSParser:
         subartist = ""
         rank: int | None = None
         level = ""
+        ln_type = 1
+        ln_objects: set[str] = set()
         random_stack: List[int | None] = []
         condition_stack: List[_ConditionBlock] = []
 
@@ -160,6 +184,13 @@ class PMSParser:
                         rank = int(value)
                     except ValueError:
                         rank = None
+                elif tag == "LNTYPE" and value:
+                    try:
+                        ln_type = int(value)
+                    except ValueError:
+                        pass
+                elif tag == "LNOBJ" and value:
+                    ln_objects.update(part.upper() for part in value.split() if part)
                 elif tag in {"LEVEL", "PLAYLEVEL"} and value:
                     level = value
                 elif tag == "MEASURE" and value:
@@ -171,7 +202,15 @@ class PMSParser:
                             pass
                 continue
 
-        notes, total_time, bpm_stats = self._convert_to_notes(measures, bpm, bpm_defs, stop_defs, measure_lengths)
+        notes, total_time, bpm_stats = self._convert_to_notes(
+            measures,
+            bpm,
+            bpm_defs,
+            stop_defs,
+            measure_lengths,
+            ln_type=ln_type,
+            ln_objects=ln_objects,
+        )
         start_bpm, min_bpm, max_bpm = bpm_stats
 
         return ParseResult(
@@ -338,10 +377,14 @@ class PMSParser:
         bpm_defs: Dict[str, float],
         stop_defs: Dict[str, int],
         measure_lengths: Dict[int, float],
+        *,
+        ln_type: int = 1,
+        ln_objects: set[str] | None = None,
     ) -> tuple[List[Note], float, tuple[float, float, float]]:
         current_time = 0.0
         current_bpm = base_bpm
         notes: List[Note] = []
+        long_note_open: Dict[int, bool] = {channel: False for channel in LONG_NOTE_CHANNELS}
         previous_measure = -1
         min_bpm = base_bpm
         max_bpm = base_bpm
@@ -352,12 +395,12 @@ class PMSParser:
                 gap_length = measure_lengths.get(missing, 1.0)
                 current_time += self._position_to_seconds(1.0, current_bpm, gap_length)
 
-            events = self._expand_measure_events(measures[measure], bpm_defs, stop_defs)
+            events = self._expand_measure_events(measures[measure], bpm_defs, stop_defs, ln_objects or set())
             measure_length = measure_lengths.get(measure, 1.0)
             events.sort(key=lambda item: (item[0], self._event_priority(item[1])))
 
             previous_position = 0.0
-            for position, kind, value in events:
+            for position, kind, value, channel in events:
                 delta_pos = position - previous_position
                 current_time += self._position_to_seconds(delta_pos, current_bpm, measure_length)
                 previous_position = position
@@ -367,14 +410,26 @@ class PMSParser:
                     min_bpm = min(min_bpm, current_bpm)
                     max_bpm = max(max_bpm, current_bpm)
                 elif kind == "note":
-                    notes.append(Note(time=current_time, key_index=value))
+                    notes.append(Note(time=current_time, key_index=int(value)))
+                elif kind == "long":
+                    if ln_type == 1:
+                        is_end = channel is not None and long_note_open.get(channel, False)
+                        if channel is not None and (not is_end or self.count_long_note_ends):
+                            notes.append(Note(time=current_time, key_index=int(value)))
+                        if channel is not None:
+                            long_note_open[channel] = not is_end
+                    else:
+                        notes.append(Note(time=current_time, key_index=int(value)))
+                elif kind == "lnobj_end":
+                    if self.count_long_note_ends:
+                        notes.append(Note(time=current_time, key_index=int(value)))
                 elif kind == "stop":
                     current_time += self._stop_value_to_seconds(value, current_bpm)
 
             current_time += self._position_to_seconds(1.0 - previous_position, current_bpm, measure_length)
             previous_measure = measure
 
-        notes.sort(key=lambda n: n.time)
+        notes.sort(key=lambda n: (n.time, n.key_index))
         unique_notes: List[Note] = []
         for note in notes:
             if unique_notes and note.key_index == unique_notes[-1].key_index and abs(note.time - unique_notes[-1].time) < 1e-6:
@@ -383,9 +438,13 @@ class PMSParser:
         return unique_notes, current_time, (base_bpm, min_bpm, max_bpm)
 
     def _expand_measure_events(
-        self, measure_data: Iterable[Tuple[int, str]], bpm_defs: Dict[str, float], stop_defs: Dict[str, int]
-    ) -> List[Tuple[float, str, float | int]]:
-        events: List[Tuple[float, str, float | int]] = []
+        self,
+        measure_data: Iterable[Tuple[int, str]],
+        bpm_defs: Dict[str, float],
+        stop_defs: Dict[str, int],
+        ln_objects: set[str],
+    ) -> List[Tuple[float, str, float | int, int | None]]:
+        events: List[Tuple[float, str, float | int, int | None]] = []
         for channel, data in measure_data:
             if len(data) % 2 != 0:
                 continue
@@ -398,22 +457,25 @@ class PMSParser:
 
                 if channel in MINE_CHANNELS:
                     continue
-                if channel in KEY_CHANNELS:
-                    events.append((position, "note", KEY_CHANNELS[channel]))
+                if channel in NORMAL_KEY_CHANNELS:
+                    kind = "lnobj_end" if code.upper() in ln_objects else "note"
+                    events.append((position, kind, NORMAL_KEY_CHANNELS[channel], channel))
+                elif channel in LONG_NOTE_CHANNELS:
+                    events.append((position, "long", LONG_NOTE_CHANNELS[channel], channel))
                 elif channel == 8:
                     bpm_value = bpm_defs.get(code.upper())
                     if bpm_value:
-                        events.append((position, "bpm", bpm_value))
+                        events.append((position, "bpm", bpm_value, None))
                 elif channel == 3:
                     try:
                         bpm_value = int(code, 16)
-                        events.append((position, "bpm", float(bpm_value)))
+                        events.append((position, "bpm", float(bpm_value), None))
                     except ValueError:
                         continue
                 elif channel == 9:
                     stop_value = stop_defs.get(code.upper())
                     if stop_value is not None:
-                        events.append((position, "stop", stop_value))
+                        events.append((position, "stop", stop_value, None))
         return events
 
     def _event_priority(self, kind: str) -> int:
