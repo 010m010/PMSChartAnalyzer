@@ -73,7 +73,7 @@ from ..storage import (
     save_cached_difficulty_table,
     update_saved_table_name,
 )
-from .charts import BoxPlotCanvas, CorrelationScatterChart, DifficultyScatterChart, StackedDensityChart
+from .charts import BoxPlotCanvas, CorrelationScatterChart, DifficultyScatterChart, ScatterPointInfo, StackedDensityChart
 from .playground_dialog import PlaygroundDialog
 from PyQt6.sip import isdeleted
 
@@ -1021,6 +1021,8 @@ class DifficultyTab(QWidget):
 
     def set_open_single_handler(self, handler: callable[[Path], None]) -> None:
         self._open_single_callback = handler
+        self.difficulty_chart.set_open_point_callback(self._open_single_from_chart_popup)
+        self.correlation_chart.set_open_point_callback(self._open_single_from_chart_popup)
 
     def update_single_overlay(
         self, title: str, density: DensityResult, note_count: int, total_value: Optional[float]
@@ -1030,6 +1032,24 @@ class DifficultyTab(QWidget):
         self._single_overlay_note_count = note_count
         self._single_overlay_total_value = total_value
         self._refresh_chart_only()
+
+    def _open_single_from_chart_popup(self, path_text: str) -> None:
+        if not self._open_single_callback:
+            return
+        path = Path(path_text)
+        if not path.exists():
+            QMessageBox.warning(self, "File not found", f"Chart file was not found: {path}")
+            return
+        self._open_single_callback(path)
+
+    def _analysis_display_title(self, analysis: ChartAnalysis) -> str:
+        title = analysis.entry.title or analysis.title
+        subtitle = analysis.entry.subtitle or analysis.subtitle
+        return f"{title} {subtitle}" if subtitle else title
+
+    def _format_scatter_value(self, value: float) -> str:
+        formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+        return formatted if formatted and formatted != "-0" else "0"
 
     def _derive_table_name(self, source: Optional[str]) -> str:
         if not source:
@@ -1620,6 +1640,7 @@ class DifficultyTab(QWidget):
         x_metric = self.correlation_x_selector.currentText()
         y_metric = self.metric_selector.currentText()
         points: list[tuple[float, float, str]] = []
+        point_infos: list[ScatterPointInfo] = []
         for analysis in self._latest_analyses:
             if not self._is_chart_visible(analysis):
                 continue
@@ -1629,7 +1650,19 @@ class DifficultyTab(QWidget):
             y_value = self._metric_value(analysis, y_metric)
             if x_value is None or y_value is None:
                 continue
-            points.append((x_value, y_value, self._format_difficulty(analysis.difficulty)))
+            level = self._format_difficulty(analysis.difficulty)
+            points.append((x_value, y_value, level))
+            point_infos.append(
+                ScatterPointInfo(
+                    title=self._analysis_display_title(analysis),
+                    level=level,
+                    x_label=x_metric,
+                    x_value=self._format_scatter_value(x_value),
+                    y_label=y_metric,
+                    y_value=self._format_scatter_value(y_value),
+                    path=str(analysis.resolved_path),
+                )
+            )
 
         xs = [point[0] for point in points]
         ys = [point[1] for point in points]
@@ -1657,6 +1690,7 @@ class DifficultyTab(QWidget):
             stats_text=stats_text,
             x_limits=x_limits,
             y_limits=y_limits,
+            point_infos=point_infos,
         )
 
     def _render_chart(self) -> None:
@@ -1668,6 +1702,7 @@ class DifficultyTab(QWidget):
         self.correlation_chart.hide()
         metric = self.metric_selector.currentText()
         data: Dict[str, List[float]] = {}
+        scatter_records: list[tuple[str, float, ChartAnalysis]] = []
         for analysis in self._latest_analyses:
             if not self._is_chart_visible(analysis):
                 continue
@@ -1678,14 +1713,28 @@ class DifficultyTab(QWidget):
                 continue
             key = self._format_difficulty(analysis.difficulty)
             data.setdefault(key, []).append(value)
+            scatter_records.append((key, value, analysis))
 
         ordered_keys = sorted(data.keys(), key=difficulty_sort_key)
+        records_by_key: Dict[str, list[tuple[float, ChartAnalysis]]] = {}
+        for key, value, analysis in scatter_records:
+            records_by_key.setdefault(key, []).append((value, analysis))
         scatter_points = []
+        scatter_point_infos: list[ScatterPointInfo] = []
         all_values: list[float] = []
         for key in ordered_keys:
-            for v in data[key]:
-                scatter_points.append((key, v))
-                all_values.append(v)
+            for value, analysis in records_by_key.get(key, []):
+                scatter_points.append((key, value))
+                scatter_point_infos.append(
+                    ScatterPointInfo(
+                        title=self._analysis_display_title(analysis),
+                        level=key,
+                        y_label=metric,
+                        y_value=self._format_scatter_value(value),
+                        path=str(analysis.resolved_path),
+                    )
+                )
+                all_values.append(value)
         overlay_line = None
         overlay_value = None
         if self.single_overlay_checkbox.isChecked():
@@ -1711,6 +1760,7 @@ class DifficultyTab(QWidget):
                 sort_key=difficulty_sort_key,
                 y_limits=y_limits,
                 overlay_line=overlay_line,
+                point_infos=scatter_point_infos,
             )
 
     def _metric_value(self, analysis: ChartAnalysis, metric: str) -> float | None:
