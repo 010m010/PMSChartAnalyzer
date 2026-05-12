@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import html
 import warnings
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 import matplotlib
+from matplotlib.backend_bases import MouseButton
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 from matplotlib import cm, rcParams
 from matplotlib.widgets import SpanSelector
 import numpy as np
-from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QPalette, QGuiApplication
+from PyQt6.QtCore import QPoint, Qt, QTimer
+from PyQt6.QtGui import QCursor, QPalette, QGuiApplication
+from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 from ..theme import system_prefers_dark
 
@@ -21,6 +25,257 @@ rcParams["font.family"] = ["Meiryo", "Yu Gothic", "MS Gothic", "sans-serif"]
 matplotlib.use("Agg")
 
 ThemeMode = str  # "system", "light", "dark"
+
+
+@dataclass(frozen=True)
+class ScatterPointInfo:
+    title: str
+    level: str
+    y_label: str
+    y_value: str
+    path: str | None = None
+    x_label: str | None = None
+    x_value: str | None = None
+
+
+@dataclass(frozen=True)
+class _HoverPoint:
+    x: float
+    y: float
+    info: ScatterPointInfo
+
+
+class _ScatterPointPopup(QFrame):
+    def __init__(self, parent, open_callback: Callable[[str], None]) -> None:
+        super().__init__(parent)
+        self._open_callback = open_callback
+        self._current_path: str | None = None
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        self.label = QLabel(self)
+        self.label.setTextFormat(Qt.TextFormat.RichText)
+        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.label.setOpenExternalLinks(False)
+        self.label.linkActivated.connect(self._on_link_activated)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.addWidget(self.label)
+        self.hide()
+
+    def show_info(self, info: ScatterPointInfo, global_pos: QPoint, *, dark: bool) -> None:
+        self._current_path = info.path
+        text_color = "#E6E6E6" if dark else "#1D2835"
+        bg_color = "#2A2A2A" if dark else "#FFFFFF"
+        border_color = "#666666" if dark else "#B7C3D0"
+        link_color = "#8FD2FF" if dark else "#1F68B3"
+        self.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 6px;
+            }}
+            QLabel {{
+                color: {text_color};
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+
+        def row(label: str, value: str) -> str:
+            return f"<div><b>{html.escape(label)}</b>: {value}</div>"
+
+        title = html.escape(info.title or "(untitled)")
+        if info.path:
+            title = (
+                f'<a href="open" style="color: {link_color}; '
+                f'text-decoration: underline;">{title}</a>'
+            )
+        rows = [row("TITLE", title), row("LEVEL", html.escape(info.level))]
+        if info.x_label and info.x_value is not None:
+            rows.append(row(info.x_label, html.escape(info.x_value)))
+        rows.append(row(info.y_label, html.escape(info.y_value)))
+        self.label.setText("".join(rows))
+        self.adjustSize()
+
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        local = parent.mapFromGlobal(global_pos) + QPoint(14, 14)
+        max_x = max(0, parent.width() - self.width() - 4)
+        max_y = max(0, parent.height() - self.height() - 4)
+        if local.x() > max_x:
+            local.setX(max(4, parent.mapFromGlobal(global_pos).x() - self.width() - 14))
+        if local.y() > max_y:
+            local.setY(max(4, parent.mapFromGlobal(global_pos).y() - self.height() - 14))
+        self.move(max(4, min(local.x(), max_x)), max(4, min(local.y(), max_y)))
+        self.raise_()
+        self.show()
+
+    def _on_link_activated(self, _url: str) -> None:
+        if self._current_path:
+            self.hide()
+            self._open_callback(self._current_path)
+
+
+class _ScatterHoverController:
+    def __init__(self, canvas: FigureCanvasQTAgg, ax) -> None:
+        self.canvas = canvas
+        self.ax = ax
+        self.points: list[_HoverPoint] = []
+        self._data_xy = np.empty((0, 2), dtype=float)
+        self._open_callback: Callable[[str], None] | None = None
+        self._active_index: int | None = None
+        self._selected_index: int | None = None
+        self._selection_artist = None
+        self._radius_px = 8.0
+        self._popup = _ScatterPointPopup(canvas, self._open_path)
+        self._hide_timer = QTimer(canvas)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self._hide_if_cursor_outside)
+        self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+        self.canvas.mpl_connect("button_press_event", self._on_button_press)
+        self.canvas.mpl_connect("figure_leave_event", lambda _event: self._schedule_hide())
+
+    def set_open_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._open_callback = callback
+
+    def set_points(self, points: list[_HoverPoint]) -> None:
+        self.reset()
+        self.points = points
+        if points:
+            self._data_xy = np.array([(point.x, point.y) for point in points], dtype=float)
+        else:
+            self._data_xy = np.empty((0, 2), dtype=float)
+
+    def reset(self) -> None:
+        self._active_index = None
+        self._selected_index = None
+        self._remove_selection_artist()
+        self._popup.hide()
+
+    def hide(self) -> None:
+        if self._selected_index is not None:
+            return
+        self._active_index = None
+        self._popup.hide()
+
+    def clear_selection(self) -> None:
+        self._selected_index = None
+        self._active_index = None
+        self._remove_selection_artist()
+        self._popup.hide()
+        self.canvas.draw_idle()
+
+    def _open_path(self, path: str) -> None:
+        self.clear_selection()
+        if self._open_callback:
+            self._open_callback(path)
+
+    def _on_motion(self, event) -> None:
+        if self._selected_index is not None:
+            return
+        if event.inaxes is not self.ax:
+            self.hide()
+            return
+        index = self._nearest_index(event)
+        if index is None:
+            self.hide()
+            return
+        if index == self._active_index and self._popup.isVisible():
+            return
+        self._active_index = index
+        self._popup.show_info(self.points[index].info, QCursor.pos(), dark=self._is_dark_mode())
+
+    def _on_button_press(self, event) -> None:
+        if getattr(event, "button", None) not in (MouseButton.LEFT, 1):
+            return
+        if event.inaxes is not self.ax:
+            self.clear_selection()
+            return
+        index = self._nearest_index(event)
+        if index is None:
+            self.clear_selection()
+            return
+        self._select_index(index)
+
+    def _nearest_index(self, event) -> int | None:
+        if not self.points:
+            return None
+        display = self.ax.transData.transform(self._data_xy)
+        distances = (display[:, 0] - event.x) ** 2 + (display[:, 1] - event.y) ** 2
+        index = int(np.argmin(distances))
+        if float(distances[index]) <= self._radius_px**2:
+            return index
+        return None
+
+    def _select_index(self, index: int) -> None:
+        self._selected_index = index
+        self._active_index = index
+        self._draw_selection_artist(index)
+        self._popup.show_info(self.points[index].info, QCursor.pos(), dark=self._is_dark_mode())
+
+    def _draw_selection_artist(self, index: int) -> None:
+        self._remove_selection_artist()
+        point = self.points[index]
+        x_limits = self.ax.get_xlim()
+        y_limits = self.ax.get_ylim()
+        edge_color = "#FFE08A" if self._is_dark_mode() else "#D14C1F"
+        self._selection_artist = self.ax.scatter(
+            [point.x],
+            [point.y],
+            s=96,
+            facecolors="none",
+            edgecolors=edge_color,
+            linewidths=1.8,
+            zorder=8,
+        )
+        self.ax.set_xlim(*x_limits)
+        self.ax.set_ylim(*y_limits)
+        self.canvas.draw_idle()
+
+    def _remove_selection_artist(self) -> None:
+        if self._selection_artist is None:
+            return
+        try:
+            self._selection_artist.remove()
+        except ValueError:
+            pass
+        self._selection_artist = None
+
+    def _schedule_hide(self) -> None:
+        if self._selected_index is None:
+            self._hide_timer.start(180)
+
+    def _hide_if_cursor_outside(self) -> None:
+        if self._selected_index is not None:
+            return
+        pos = QCursor.pos()
+        canvas_pos = self.canvas.mapFromGlobal(pos)
+        popup_pos = self._popup.mapFromGlobal(pos)
+        if self.canvas.rect().contains(canvas_pos) or self._popup.rect().contains(popup_pos):
+            return
+        self.hide()
+
+    def _is_dark_mode(self) -> bool:
+        chart = self.canvas
+        if hasattr(chart, "_is_dark_mode"):
+            return bool(chart._is_dark_mode())
+        return False
+
+
+def _normalized_point_infos(
+    points: list[object],
+    point_infos: Optional[List[ScatterPointInfo]],
+) -> list[ScatterPointInfo | None]:
+    infos: list[ScatterPointInfo | None] = list(point_infos or [])
+    if len(infos) < len(points):
+        infos.extend([None] * (len(points) - len(infos)))
+    return infos[: len(points)]
 
 DARK_DENSITY_CMAP = LinearSegmentedColormap.from_list(
     "density_dark",
@@ -541,6 +796,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
         self._last_plot_state: dict[str, object] | None = None
+        self._hover = _ScatterHoverController(self, self.ax)
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
         self._resize_debounce_timer.timeout.connect(self._handle_resize_redraw)
@@ -560,6 +816,9 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         self.theme_mode = mode
         self._style_axes(dark=self._is_dark_mode())
         self._redraw_last_plot()
+
+    def set_open_point_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._hover.set_open_callback(callback)
 
     def _style_axes(self, y_label: str = "密度", *, dark: bool) -> None:
         face = "#1f1f1f" if dark else "#f2f4f8"
@@ -587,6 +846,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
         sort_key: Optional[Callable[[str], object]] = None,
         y_limits: Optional[tuple[float, float]] = None,
         overlay_line: Optional[tuple[float, str, str]] = None,
+        point_infos: Optional[List[ScatterPointInfo]] = None,
     ) -> None:
         self._last_plot_state = {
             "points": points,
@@ -595,22 +855,33 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             "sort_key": sort_key,
             "y_limits": y_limits,
             "overlay_line": overlay_line,
+            "point_infos": point_infos,
         }
+        self._hover.reset()
         self.ax.clear()
         dark = self._is_dark_mode()
         self._style_axes(y_label=y_label, dark=dark)
         if not points:
+            self._hover.set_points([])
             self.draw()
             return
 
         diffs = [p[0] for p in points]
         unique = order if order is not None else sorted({d for d in diffs}, key=sort_key or (lambda x: x))
         pos_map = {val: idx for idx, val in enumerate(unique)}
-        filtered = [(d, den) for d, den in points if d in pos_map]
-        x = [pos_map[d] for d, _ in filtered]
-        y_vals = [den for _, den in filtered]
+        infos = _normalized_point_infos(points, point_infos)
+        filtered = [(d, den, info) for (d, den), info in zip(points, infos) if d in pos_map]
+        x = [pos_map[d] for d, _, _ in filtered]
+        y_vals = [den for _, den, _ in filtered]
         marker_color = "#7CC7FF" if dark else "#2F7ACC"
         self.ax.scatter(x, y_vals, c=marker_color, alpha=0.85)
+        self._hover.set_points(
+            [
+                _HoverPoint(float(x_val), float(y_val), info)
+                for x_val, y_val, info in zip(x, y_vals, [info for _, _, info in filtered])
+                if info is not None
+            ]
+        )
         self.ax.set_xticks(list(pos_map.values()), labels=unique)
         grid = "#555555" if dark else "#b8c5d3"
         self.ax.grid(color=grid, linestyle=":", linewidth=0.7)
@@ -642,6 +913,7 @@ class DifficultyScatterChart(FigureCanvasQTAgg):
             sort_key=self._last_plot_state["sort_key"],
             y_limits=self._last_plot_state["y_limits"],
             overlay_line=self._last_plot_state["overlay_line"],
+            point_infos=self._last_plot_state["point_infos"],
         )
 
     def _handle_resize_redraw(self) -> None:
@@ -665,6 +937,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         self.theme_mode: ThemeMode = "system"
         self._style_axes(dark=self._is_dark_mode())
         self._last_plot_state: dict[str, object] | None = None
+        self._hover = _ScatterHoverController(self, self.ax)
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
         self._resize_debounce_timer.timeout.connect(self._handle_resize_redraw)
@@ -684,6 +957,9 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         self.theme_mode = mode
         self._style_axes(dark=self._is_dark_mode())
         self._redraw_last_plot()
+
+    def set_open_point_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._hover.set_open_callback(callback)
 
     def _style_axes(self, x_label: str = "X", y_label: str = "Y", *, dark: bool) -> None:
         face = "#1f1f1f" if dark else "#f2f4f8"
@@ -715,6 +991,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         stats_text: str = "",
         x_limits: Optional[tuple[float, float]] = None,
         y_limits: Optional[tuple[float, float]] = None,
+        point_infos: Optional[List[ScatterPointInfo]] = None,
     ) -> None:
         self._last_plot_state = {
             "points": points,
@@ -727,11 +1004,14 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             "stats_text": stats_text,
             "x_limits": x_limits,
             "y_limits": y_limits,
+            "point_infos": point_infos,
         }
+        self._hover.reset()
         self.ax.clear()
         dark = self._is_dark_mode()
         self._style_axes(x_label=x_label, y_label=y_label, dark=dark)
         if not points:
+            self._hover.set_points([])
             self._draw_stats_text(stats_text, dark=dark)
             self._apply_layout()
             self.draw()
@@ -756,6 +1036,15 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             xs = [x for x, _, _ in points]
             ys = [y for _, y, _ in points]
             self.ax.scatter(xs, ys, c=marker_color, alpha=0.82)
+
+        infos = _normalized_point_infos(points, point_infos)
+        self._hover.set_points(
+            [
+                _HoverPoint(float(x), float(y), info)
+                for (x, y, _level), info in zip(points, infos)
+                if info is not None
+            ]
+        )
 
         xs = np.array([x for x, _, _ in points], dtype=float)
         ys = np.array([y for _, y, _ in points], dtype=float)
@@ -789,6 +1078,7 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
             stats_text=self._last_plot_state["stats_text"],
             x_limits=self._last_plot_state["x_limits"],
             y_limits=self._last_plot_state["y_limits"],
+            point_infos=self._last_plot_state["point_infos"],
         )
 
     def _draw_stats_text(self, stats_text: str, *, dark: bool) -> None:
@@ -835,4 +1125,10 @@ class CorrelationScatterChart(FigureCanvasQTAgg):
         self._schedule_resize_redraw()
 
 
-__all__ = ["StackedDensityChart", "BoxPlotCanvas", "DifficultyScatterChart", "CorrelationScatterChart"]
+__all__ = [
+    "StackedDensityChart",
+    "BoxPlotCanvas",
+    "DifficultyScatterChart",
+    "CorrelationScatterChart",
+    "ScatterPointInfo",
+]
