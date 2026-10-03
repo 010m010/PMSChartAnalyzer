@@ -39,6 +39,11 @@ pmsファイルを読み込んで秒間密度チャートを確認できるほ�
   1. 保存先フォルダへ移動し、`(Windows) setup.bat`/`(macOS/Linux) setup.sh` を実行して仮想環境の作成と依存ライブラリのインストールを行います。
   2. セットアップ完了後は`(Windows) run.bat`/`(macOS/Linux) run.sh` を実行するとアプリケーションが起動します。（以降はrun.batのみ実行で起動できます）
 
+## 開発・テスト
+
+開発用の依存を導入するには、Windows では `setup.bat --dev`、macOS/Linux では `bash setup.sh --dev` を実行します。
+Windows の `check.bat`、または `.venv` の Python で `scripts/check.py` を実行すると、テストと導入スキルを検証できます。詳しい手順は [開発環境とチェック](docs/development.md) を参照してください。
+
 ## アプリケーションについて
 
 このアプリケーションはcodexを使用して作成したものです。

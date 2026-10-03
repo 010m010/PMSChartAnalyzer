@@ -1,0 +1,81 @@
+{
+  "scope": "project",
+  "agent": "codex",
+  "installDirectory": ".agents/skills",
+  "forbiddenProjectPaths": [
+    "CLAUDE.md",
+    ".claude",
+    ".claude-plugin",
+    ".agents/skills/ui-ux-pro-max/scripts/tests"
+  ],
+  "sources": [
+    {
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+      "sourcePaths": [
+        "skills/engineering",
+        "skills/productivity"
+      ],
+      "skills": [
+        "ask-matt",
+        "code-review",
+        "codebase-design",
+        "diagnosing-bugs",
+        "domain-modeling",
+        "grill-me",
+        "grill-with-docs",
+        "grilling",
+        "handoff",
+        "implement",
+        "implement-spec",
+        "improve-codebase-architecture",
+        "pr",
+        "prototype",
+        "research",
+        "retro",
+        "setup-matt-pocock-skills",
+        "tdd",
+        "teach",
+        "to-questionnaire",
+        "to-spec",
+        "to-tickets",
+        "triage",
+        "wait-what",
+        "wayfinder",
+        "wizard",
+        "writing-for-agents"
+      ],
+      "excluded": [
+        "skills/in-progress",
+        "skills/misc",
+        ".claude-plugin",
+        "CLAUDE.md",
+        "repository development files"
+      ],
+      "license": ".agents/licenses/mattpocock-skills-LICENSE.txt"
+    },
+    {
+      "repository": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "installer": "ui-ux-pro-max-cli",
+      "installerVersion": "2.15.0",
+      "packageIntegrity": "sha512-D0J/C40xrzzi5si6ZLtRGbEE5v3QjL7d4wJNnasmP3yfDSrGiuqVCdwQiqCNnIkbqOuVoA/uonR2o1WKXh3urw==",
+      "command": "npx --yes --package ui-ux-pro-max-cli@2.15.0 uipro init --ai codex --offline",
+      "skills": [
+        "ui-ux-pro-max"
+      ],
+      "excluded": [
+        "other AI platforms",
+        "banner-design",
+        "brand",
+        "design",
+        "design-system",
+        "slides",
+        "ui-styling",
+        "scripts/tests",
+        "CLAUDE.md"
+      ],
+      "licenseSourceCommit": "09170eec67eefd46a7ae85de61b40c194020f997",
+      "license": ".agents/licenses/ui-ux-pro-max-LICENSE.txt"
+    }
+  ]
+}

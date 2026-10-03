@@ -1,0 +1,5 @@
+* text=auto
+# Skill catalog snapshots hash file bytes; preserve their LF line endings.
+/.agents/** text eol=lf
+*.bat text eol=crlf
+*.sh text eol=lf
